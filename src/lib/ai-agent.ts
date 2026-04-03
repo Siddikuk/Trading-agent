@@ -43,10 +43,10 @@ interface NewsContext {
 }
 
 // ==================== NEWS FETCHING ====================
-// Targeted financial news from authoritative sources only.
-// No Wikipedia, no tutorial blogs, no SEO spam.
-// Sources: Reuters, Bloomberg, CNBC, Investing.com, ForexLive, FXStreet,
-//          MarketWatch, TradingEconomics, Financial Times, WSJ
+// IMPORTANT: The z-ai-web-dev-sdk does NOT support Google-style `site:` operators.
+// Queries must use plain English keywords to match real financial news.
+// Goal: Real market-moving events — central bank decisions, geopolitical events,
+// economic data releases, sanctions, trade wars — NOT tutorials, ads, or SEO spam.
 
 const NEWS_CACHE = new Map<string, { data: NewsContext[]; ts: number }>();
 const NEWS_CACHE_TTL = 300000; // 5 minutes
@@ -60,9 +60,9 @@ const TIER1_DOMAINS = [
 
 // Tier 2 = solid financial news (good quality)
 const TIER2_DOMAINS = [
-  'yahoo.com/finance', 'finance.yahoo.com', 'money.cnn.com',
-  'barrons.com', 'fool.com', 'seekingalpha.com',
-  'coinmarketcap.com', 'coindesk.com', 'cointelegraph.com',
+  'finance.yahoo.com', 'yahoo.com/finance', 'money.cnn.com',
+  'barrons.com', 'seekingalpha.com',
+  'coindesk.com', 'cointelegraph.com',
   'kitco.com', 'gold.org',
 ];
 
@@ -72,7 +72,39 @@ const JUNK_PATTERNS = [
   'quora.com', 'pinterest.com', 'facebook.com', 'twitter.com',
   'instagram.com', 'tiktok.com', 'linkedin.com', 'medium.com',
   '.edu', 'academia.edu', 'researchgate.net',
+  'study.com', 'tastyfx.com', 'tastytrade.com', 'robinhood.com',
+  'webull.com', 'etoro.com', 'plus500.com', 'avatrade.com',
+  'pepperstone.com', 'icmarkets.com', 'exness.com', 'xm.com',
 ];
+
+// Title/snippet keywords that indicate JUNK content (tutorials, ads, beginner content)
+const JUNK_TITLE_PATTERNS = [
+  'what is forex', 'what is trading', 'what is currency',
+  'how to trade', 'how to start', 'how to read',
+  'forex for beginners', 'forex 101', 'forex trading 101',
+  'trading for beginners', 'trading 101',
+  'learn forex', 'learn trading', 'learn to trade',
+  'forex basics', 'trading basics', 'the basics',
+  'forex meaning', 'forex explained', 'trading explained',
+  'forex tutorial', 'trading tutorial', 'tutorial',
+  'forex course', 'trading course', 'online course',
+  'forex guide', 'beginner guide', 'complete guide',
+  'start trading', 'open account', 'sign up', 'register now',
+  'trade forex online', 'try demo', 'practice account',
+  'best forex broker', 'top forex broker', 'broker review',
+  'low spreads', 'award winning', '80+ pairs',
+  'trade with', 'start with', 'join now', 'get started',
+  'no experience', 'zero commission', 'bonus', 'promotional',
+  'meaning & how', 'meaning and how', 'how it works',
+  'setup explained', 'deepening my understanding',
+  'thanks for watching', 'subscribe', 'like and subscribe',
+  'ian coleman', 'jason', 'no regrets subscribing',
+];
+
+function isJunkContent(title: string, snippet: string): boolean {
+  const combined = `${title} ${snippet}`.toLowerCase();
+  return JUNK_TITLE_PATTERNS.some(pattern => combined.includes(pattern));
+}
 
 function scoreNewsSource(host: string): number {
   if (!host) return 0;
@@ -89,11 +121,14 @@ function scoreNewsSource(host: string): number {
   for (const d of TIER2_DOMAINS) {
     if (h.includes(d)) return 70 + Math.floor(Math.random() * 16);
   }
-  // Unknown domain — give it a low score, AI will decide if useful
-  // Only accept if it looks like a news site (has "news", "finance", "trading", "market", "forex" in domain)
-  const newsKeywords = ['news', 'finance', 'trading', 'market', 'forex', 'invest', 'stock', 'commodit', 'crypto', 'btc', 'gold'];
-  if (newsKeywords.some(k => h.includes(k))) return 40 + Math.floor(Math.random() * 21);
-  return 0; // Reject unknown/unrelated domains
+  // Unknown domain — ONLY accept if it looks like a real financial news site
+  // Must have a strong finance/news indicator in the domain
+  const strongNewsKeywords = ['reuters', 'bloomberg', 'cnbc', 'wsj', 'marketwatch', 'financial times', 'economist'];
+  if (strongNewsKeywords.some(k => h.includes(k))) return 80;
+  // Moderate news indicators
+  const moderateKeywords = ['news', 'finance', 'trading', 'market', 'investing', 'stock', 'commodit', 'crypto', 'cointelegraph', 'coindesk'];
+  if (moderateKeywords.some(k => h.includes(k))) return 40 + Math.floor(Math.random() * 21);
+  return 0; // Reject everything else (broker sites, generic .com, etc.)
 }
 
 async function fetchNewsFromWeb(
@@ -104,7 +139,7 @@ async function fetchNewsFromWeb(
   try {
     const results = await zai.functions.invoke('web_search', {
       query,
-      num: num + 5, // Fetch extra to account for filtering
+      num: num + 10, // Fetch extra to account for heavy filtering
       recency_days: 1,
     });
     const raw = (results || []).map((r: { name?: string; snippet?: string; host_name?: string; date?: string; url?: string }) => ({
@@ -114,9 +149,15 @@ async function fetchNewsFromWeb(
       date: String(r.date || ''),
       score: scoreNewsSource(String(r.host_name || '')),
     }));
-    // Filter out junk and weak results, sort by quality score
+    // Filter out junk: bad domains, short titles, short snippets, tutorial/ad content
     return raw
-      .filter(n => n.score > 0 && n.title.length > 15 && n.snippet.length > 20)
+      .filter(n => {
+        if (n.score <= 0) return false;
+        if (n.title.length < 20) return false;
+        if (n.snippet.length < 30) return false;
+        if (isJunkContent(n.title, n.snippet)) return false;
+        return true;
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, num);
   } catch (error) {
@@ -125,7 +166,13 @@ async function fetchNewsFromWeb(
   }
 }
 
-/** Build targeted financial news queries for a symbol */
+/**
+ * Build targeted financial news queries for a symbol.
+ * CRITICAL: No `site:` operators — they don't work with this search SDK.
+ * Instead, use specific keywords that match real financial news headlines.
+ * Focus on MARKET-MOVING events: central bank decisions, economic data,
+ * geopolitical tensions, sanctions, trade wars, elections.
+ */
 function buildNewsQueries(symbol: string): string[] {
   const isCrypto = symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL');
   const isGold = symbol.includes('XAU');
@@ -141,31 +188,55 @@ function buildNewsQueries(symbol: string): string[] {
 
   if (isCrypto) {
     queries.push(
-      `site:reuters.com OR site:coindesk.com OR site:cointelegraph.com ${symbol} price news today`,
-      `cryptocurrency market news ${symbol} regulation SEC today`,
+      `${symbol} cryptocurrency price analysis market news today Reuters Bloomberg`,
+      `${symbol} crypto regulation SEC Fed policy impact today`,
     );
   } else if (isGold) {
     queries.push(
-      `site:reuters.com OR site:kitco.com OR site:investing.com gold price XAUUSD today`,
-      `gold market news Fed interest rate inflation today`,
+      `gold price XAUUSD market analysis breaking news today Reuters Bloomberg`,
+      `gold market Federal Reserve interest rate inflation geopolitical risk today`,
     );
   } else {
-    // Forex pairs — target breaking news from tier-1 financial sources
+    // Forex pairs — targeted queries for real market-moving news
     const pair = symbol.replace('/', '');
     queries.push(
-      `site:reuters.com OR site:bloomberg.com OR site:forexlive.com OR site:fxstreet.com ${symbol} forex news today`,
-      `forex market news today ${symbol} breaking`,
+      `${pair} forex analysis market news today Reuters Bloomberg CNBC`,
+      `${pair} currency exchange rate central bank economic data breaking`,
     );
 
-    // Central bank & macro queries (these are what actually move currencies)
-    if (isJPY) queries.push('site:reuters.com OR site:bloomberg.com Bank of Japan BOJ yen interest rate policy news');
-    if (isEUR) queries.push('site:reuters.com OR site:bloomberg.com ECB European Central Bank euro interest rate decision news');
-    if (isGBP) queries.push('site:reuters.com OR site:bloomberg.com Bank of England BOE pound sterling interest rate news');
-    if (isAUD) queries.push('site:reuters.com OR site:bloomberg.com Reserve Bank of Australia RBA aussie dollar rate news');
-    if (isCAD) queries.push('site:reuters.com OR site:bloomberg.com Bank of Canada BOC loonie rate policy news');
-    if (isCHF) queries.push('site:reuters.com OR site:bloomberg.com Swiss National Bank SNB franc franc policy news');
-    if (isNZD) queries.push('site:reuters.com OR site:bloomberg.com Reserve Bank of New Zealand RBNZ kiwi rate news');
-    if (symbol.includes('USD') && !isJPY) queries.push('site:reuters.com OR site:bloomberg.com Federal Reserve FOMC US dollar rate decision news today');
+    // Central bank & macro queries — these are what ACTUALLY move currencies
+    if (isJPY) {
+      queries.push('Bank of Japan BOJ yen interest rate monetary policy decision news today');
+      queries.push('Japan yen USDJPY market analysis geopolitical risk economic data');
+    }
+    if (isEUR) {
+      queries.push('ECB European Central Bank euro interest rate monetary policy decision news');
+      queries.push('Eurozone economy euro inflation GDP economic data euro dollar analysis');
+    }
+    if (isGBP) {
+      queries.push('Bank of England BOE pound sterling interest rate monetary policy decision');
+      queries.push('UK economy pound Brexit trade policy inflation GDP economic news');
+    }
+    if (isAUD) {
+      queries.push('Reserve Bank of Australia RBA aussie dollar interest rate policy decision');
+      queries.push('Australia economy AUD China trade geopolitical risk economic data');
+    }
+    if (isCAD) {
+      queries.push('Bank of Canada BOC Canadian dollar interest rate monetary policy decision');
+      queries.push('Canada economy CAD oil prices US trade policy economic news');
+    }
+    if (isCHF) {
+      queries.push('Swiss National Bank SNB franc interest rate monetary policy decision');
+      queries.push('Switzerland franc safe haven geopolitical risk USDCHF analysis');
+    }
+    if (isNZD) {
+      queries.push('Reserve Bank of New Zealand RBNZ kiwi dollar interest rate policy decision');
+      queries.push('New Zealand economy NZD dairy trade economic data news');
+    }
+    if (symbol.includes('USD')) {
+      queries.push('Federal Reserve FOMC US dollar interest rate decision economic data today');
+      queries.push('US dollar DXY geopolitics war sanctions trade tariff economic impact');
+    }
   }
 
   return queries;
@@ -183,19 +254,23 @@ async function fetchAllNews(symbol: string): Promise<NewsContext[]> {
     const zai = await ZAI.create();
     const queries = buildNewsQueries(symbol);
 
-    // Fetch first 2 queries in parallel (most important)
+    // Fetch first 2 queries in parallel (pair-specific — most important)
     const [primaryNews, secondaryNews] = await Promise.allSettled([
-      fetchNewsFromWeb(zai, queries[0], 4),
+      fetchNewsFromWeb(zai, queries[0], 3),
       queries.length > 1 ? fetchNewsFromWeb(zai, queries[1], 3) : Promise.resolve([] as NewsContext[]),
     ]);
 
     if (primaryNews.status === 'fulfilled') allNews = [...primaryNews.value];
     if (secondaryNews.status === 'fulfilled') allNews = [...allNews, ...secondaryNews.value];
 
-    // Fetch macro/central bank query (if different from above)
+    // Fetch central bank + macro queries (these find the REAL market-moving events)
     if (queries.length > 2) {
-      const macroResult = await fetchNewsFromWeb(zai, queries[2], 3);
-      allNews = [...allNews, ...macroResult];
+      const [cbResult, macroResult] = await Promise.allSettled([
+        fetchNewsFromWeb(zai, queries[2], 2),
+        queries.length > 3 ? fetchNewsFromWeb(zai, queries[3], 2) : Promise.resolve([] as NewsContext[]),
+      ]);
+      if (cbResult.status === 'fulfilled') allNews = [...allNews, ...cbResult.value];
+      if (macroResult.status === 'fulfilled') allNews = [...allNews, ...macroResult.value];
     }
 
     // Deduplicate by title similarity
