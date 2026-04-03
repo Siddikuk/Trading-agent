@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,20 +7,74 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Trade {
+  id          String   @id @default(cuid())
+  symbol      String
+  direction   String   // BUY or SELL
+  lotSize     Float
+  entryPrice  Float
+  stopLoss    Float?
+  takeProfit  Float?
+  exitPrice   Float?
+  pnl         Float?
+  status      String   @default("OPEN") // OPEN, CLOSED, CANCELLED
+  signalId    String?
+  strategy    String?  // Which strategy generated this
+  openTime    DateTime @default(now())
+  closeTime   DateTime?
+  notes       String?
 }
 
-model Post {
+model Signal {
+  id          String   @id @default(cuid())
+  symbol      String
+  direction   String   // BUY or SELL
+  confidence  Float    // 0-100
+  entryPrice  Float
+  stopLoss    Float
+  takeProfit  Float
+  strategy    String   // Which strategy: RSI, MACD, Bollinger, etc.
+  timeframe   String
+  indicators  String   // JSON string of indicator values
+  executed    Boolean  @default(false)
+  tradeId     String?
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime?
+}
+
+model AgentState {
+  id              String @id @default("main")
+  isRunning       Boolean @default(false)
+  autoTrade       Boolean @default(false)
+  balance         Float   @default(1000)
+  currency        String  @default("USD")
+  maxRiskPercent  Float   @default(2)
+  maxDrawdownPercent Float @default(10)
+  dailyRiskLimit  Float   @default(5)
+  strategies      String  @default("RSI,MACD,Bollinger") // comma-separated
+  watchSymbols    String  @default("EURUSD=X,GBPUSD=X,USDJPY=X,XAUUSD=X,BTCUSD=X")
+  timeframe       String  @default("1h")
+  mt5Connected    Boolean @default(false)
+  lastScanAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model PriceAlert {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  symbol    String
+  condition String   // ABOVE, BELOW, CROSSES_ABOVE, CROSSES_BELOW
+  price     Float
+  isActive  Boolean  @default(true)
+  triggered Boolean  @default(false)
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  triggeredAt DateTime?
+}
+
+model WatchlistGroup {
+  id        String @id @default(cuid())
+  name      String @unique
+  symbols   String // comma-separated
+  isBuiltIn Boolean @default(false)
+  createdAt DateTime @default(now())
 }
