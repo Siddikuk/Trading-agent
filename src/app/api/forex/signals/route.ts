@@ -39,11 +39,22 @@ export async function GET(req: Request) {
       });
     }
 
+    // Return last 150 candles for chart display
+    const chartCandles = candles.slice(-150).map(c => ({
+      time: c.time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume || 0,
+    }));
+
     return NextResponse.json({
       symbol: symbolParam,
       yahooSymbol: sym,
       timeframe,
       currentPrice: price,
+      candles: chartCandles,
       indicators,
       strategyResults: results.map(r => ({
         strategy: r.signal?.strategy || 'None',

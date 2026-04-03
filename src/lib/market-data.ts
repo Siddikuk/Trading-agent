@@ -84,15 +84,28 @@ export async function fetchCandles(symbol: string, timeframe: string, limit?: nu
       return res.json();
     });
 
-    const result: YahooChartResult = data?.chart?.result?.[0];
-    if (!result) return [];
+    const chartResult = data?.chart?.result?.[0];
+    if (!chartResult) return [];
 
-    let timestamps = result.timestamp;
-    let opens = result.open;
-    let highs = result.high;
-    let lows = result.low;
-    let closes = result.close;
-    let volumes = result.volume;
+    // Yahoo Finance API: OHLC data may be directly on result or nested under indicators.quote[0]
+    let timestamps = chartResult.timestamp || [];
+    let opens: (number | null)[] = chartResult.open || [];
+    let highs: (number | null)[] = chartResult.high || [];
+    let lows: (number | null)[] = chartResult.low || [];
+    let closes: (number | null)[] = chartResult.close || [];
+    let volumes: (number | null)[] = chartResult.volume || [];
+
+    // If direct arrays are empty, try indicators.quote[0] format
+    if (opens.length === 0 && chartResult.indicators?.quote?.[0]) {
+      const quote = chartResult.indicators.quote[0];
+      opens = quote.open || [];
+      highs = quote.high || [];
+      lows = quote.low || [];
+      closes = quote.close || [];
+      volumes = quote.volume || [];
+    }
+
+    if (timestamps.length === 0 || opens.length === 0) return [];
 
     // For 4h — aggregate 1h candles into 4h
     if (timeframe === '4h') {
@@ -107,7 +120,8 @@ export async function fetchCandles(symbol: string, timeframe: string, limit?: nu
 
     const candles: Candle[] = [];
     const startIdx = Math.max(0, timestamps.length - candleLimit);
-    for (let i = startIdx; i < timestamps.length; i++) {
+    const maxIdx = Math.min(timestamps.length, opens.length, closes.length);
+    for (let i = startIdx; i < maxIdx; i++) {
       if (opens[i] == null || closes[i] == null) continue;
       candles.push({
         time: timestamps[i] * 1000,
