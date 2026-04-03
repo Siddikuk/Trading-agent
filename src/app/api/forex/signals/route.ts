@@ -89,6 +89,7 @@ export async function GET(req: Request) {
           shouldTrade: decision.shouldTrade,
           skipReason: decision.skipReason,
           newsUsed: decision.newsUsed,
+          newsSources: (decision as Record<string, unknown>).newsSources as string[] || [],
           lotSize: decision.lotSize,
           analyzedAt: decision.analyzedAt,
         },

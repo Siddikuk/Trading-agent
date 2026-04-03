@@ -204,13 +204,25 @@ export default function SignalAnalysis({
               </div>
               <Progress value={Math.min(100, aiAnalysis.riskRewardRatio * 25)} className="h-1 mt-1" />
             </div>
-            {/* News Articles */}
-            <div className="rounded-md bg-muted/30 p-2 text-center">
-              <div className="text-[10px] text-muted-foreground mb-1">News Read</div>
-              <div className="text-sm font-bold font-mono text-blue-400">
-                {aiAnalysis.newsUsed}
-              </div>
-              <div className="text-[9px] text-muted-foreground">articles</div>
+            {/* News Sources */}
+            <div className="rounded-md bg-muted/30 p-2">
+              <div className="text-[10px] text-muted-foreground mb-1 text-center">News Sources</div>
+              {aiAnalysis.newsSources && aiAnalysis.newsSources.length > 0 ? (
+                <div className="flex flex-wrap gap-1 justify-center">
+                  {aiAnalysis.newsSources.slice(0, 4).map((src, i) => (
+                    <Badge key={i} variant="outline" className="text-[9px] px-1.5 py-0 font-mono border-border/50">
+                      {src.replace('www.', '').split('.').slice(0, -1).join('.')}
+                    </Badge>
+                  ))}
+                  {aiAnalysis.newsSources.length > 4 && (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-muted-foreground">
+                      +{aiAnalysis.newsSources.length - 4}
+                    </Badge>
+                  )}
+                </div>
+              ) : (
+                <div className="text-sm font-bold font-mono text-muted-foreground text-center">0</div>
+              )}
             </div>
           </div>
 

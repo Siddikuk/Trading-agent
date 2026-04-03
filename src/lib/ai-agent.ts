@@ -30,6 +30,7 @@ export interface AIDecision {
   shouldTrade: boolean;     // Final yes/no after risk checks
   skipReason?: string;      // Why the AI decided to skip
   newsUsed: number;         // How many news articles were fed to the AI
+  newsSources: string[];    // Actual domain names of articles used
   analyzedAt: string;       // ISO timestamp
 }
 
@@ -38,31 +39,136 @@ interface NewsContext {
   snippet: string;
   source: string;
   date: string;
+  score: number; // Source quality: 0-100
 }
 
 // ==================== NEWS FETCHING ====================
-// Multi-source: symbol-specific + macro environment + central bank sentiment
+// Targeted financial news from authoritative sources only.
+// No Wikipedia, no tutorial blogs, no SEO spam.
+// Sources: Reuters, Bloomberg, CNBC, Investing.com, ForexLive, FXStreet,
+//          MarketWatch, TradingEconomics, Financial Times, WSJ
 
 const NEWS_CACHE = new Map<string, { data: NewsContext[]; ts: number }>();
 const NEWS_CACHE_TTL = 300000; // 5 minutes
 
-async function fetchNewsFromWeb(zai: Awaited<ReturnType<typeof ZAI.create>>, query: string, num = 5): Promise<NewsContext[]> {
+// Tier 1 = wire services & major financial outlets (highest trust)
+const TIER1_DOMAINS = [
+  'reuters.com', 'bloomberg.com', 'cnbc.com', 'wsj.com', 'ft.com',
+  'marketwatch.com', 'investing.com', 'forexlive.com', 'fxstreet.com',
+  'dailyfx.com', 'tradingeconomics.com', 'economist.com',
+];
+
+// Tier 2 = solid financial news (good quality)
+const TIER2_DOMAINS = [
+  'yahoo.com/finance', 'finance.yahoo.com', 'money.cnn.com',
+  'barrons.com', 'fool.com', 'seekingalpha.com',
+  'coinmarketcap.com', 'coindesk.com', 'cointelegraph.com',
+  'kitco.com', 'gold.org',
+];
+
+// Blacklisted — never use these for trading decisions
+const JUNK_PATTERNS = [
+  'wikipedia.org', 'wikihow.com', 'youtube.com', 'reddit.com',
+  'quora.com', 'pinterest.com', 'facebook.com', 'twitter.com',
+  'instagram.com', 'tiktok.com', 'linkedin.com', 'medium.com',
+  '.edu', 'academia.edu', 'researchgate.net',
+];
+
+function scoreNewsSource(host: string): number {
+  if (!host) return 0;
+  const h = host.toLowerCase();
+  // Instant reject junk domains
+  for (const junk of JUNK_PATTERNS) {
+    if (h.includes(junk)) return 0;
+  }
+  // Tier 1 = 90-100
+  for (const d of TIER1_DOMAINS) {
+    if (h.includes(d)) return 90 + Math.floor(Math.random() * 11);
+  }
+  // Tier 2 = 70-85
+  for (const d of TIER2_DOMAINS) {
+    if (h.includes(d)) return 70 + Math.floor(Math.random() * 16);
+  }
+  // Unknown domain — give it a low score, AI will decide if useful
+  // Only accept if it looks like a news site (has "news", "finance", "trading", "market", "forex" in domain)
+  const newsKeywords = ['news', 'finance', 'trading', 'market', 'forex', 'invest', 'stock', 'commodit', 'crypto', 'btc', 'gold'];
+  if (newsKeywords.some(k => h.includes(k))) return 40 + Math.floor(Math.random() * 21);
+  return 0; // Reject unknown/unrelated domains
+}
+
+async function fetchNewsFromWeb(
+  zai: Awaited<ReturnType<typeof ZAI.create>>,
+  query: string,
+  num = 5,
+): Promise<NewsContext[]> {
   try {
     const results = await zai.functions.invoke('web_search', {
       query,
-      num,
+      num: num + 5, // Fetch extra to account for filtering
       recency_days: 1,
     });
-    return (results || []).slice(0, num).map((r) => ({
+    const raw = (results || []).map((r: { name?: string; snippet?: string; host_name?: string; date?: string; url?: string }) => ({
       title: String(r.name || ''),
       snippet: String(r.snippet || ''),
       source: String(r.host_name || ''),
       date: String(r.date || ''),
+      score: scoreNewsSource(String(r.host_name || '')),
     }));
+    // Filter out junk and weak results, sort by quality score
+    return raw
+      .filter(n => n.score > 0 && n.title.length > 15 && n.snippet.length > 20)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, num);
   } catch (error) {
     console.error('[AI Agent] News fetch failed for query:', query, error);
     return [];
   }
+}
+
+/** Build targeted financial news queries for a symbol */
+function buildNewsQueries(symbol: string): string[] {
+  const isCrypto = symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL');
+  const isGold = symbol.includes('XAU');
+  const isJPY = symbol.includes('JPY');
+  const isEUR = symbol.includes('EUR');
+  const isGBP = symbol.includes('GBP');
+  const isAUD = symbol.includes('AUD');
+  const isCAD = symbol.includes('CAD');
+  const isCHF = symbol.includes('CHF');
+  const isNZD = symbol.includes('NZD');
+
+  const queries: string[] = [];
+
+  if (isCrypto) {
+    queries.push(
+      `site:reuters.com OR site:coindesk.com OR site:cointelegraph.com ${symbol} price news today`,
+      `cryptocurrency market news ${symbol} regulation SEC today`,
+    );
+  } else if (isGold) {
+    queries.push(
+      `site:reuters.com OR site:kitco.com OR site:investing.com gold price XAUUSD today`,
+      `gold market news Fed interest rate inflation today`,
+    );
+  } else {
+    // Forex pairs — target breaking news from tier-1 financial sources
+    const pair = symbol.replace('/', '');
+    queries.push(
+      `site:reuters.com OR site:bloomberg.com OR site:forexlive.com OR site:fxstreet.com ${symbol} forex news today`,
+      `forex market news today ${symbol} breaking`,
+    );
+
+    // Central bank & macro queries (these are what actually move currencies)
+    if (isJPY) queries.push('site:reuters.com OR site:bloomberg.com Bank of Japan BOJ yen interest rate policy news');
+    if (isEUR) queries.push('site:reuters.com OR site:bloomberg.com ECB European Central Bank euro interest rate decision news');
+    if (isGBP) queries.push('site:reuters.com OR site:bloomberg.com Bank of England BOE pound sterling interest rate news');
+    if (isAUD) queries.push('site:reuters.com OR site:bloomberg.com Reserve Bank of Australia RBA aussie dollar rate news');
+    if (isCAD) queries.push('site:reuters.com OR site:bloomberg.com Bank of Canada BOC loonie rate policy news');
+    if (isCHF) queries.push('site:reuters.com OR site:bloomberg.com Swiss National Bank SNB franc franc policy news');
+    if (isNZD) queries.push('site:reuters.com OR site:bloomberg.com Reserve Bank of New Zealand RBNZ kiwi rate news');
+    if (symbol.includes('USD') && !isJPY) queries.push('site:reuters.com OR site:bloomberg.com Federal Reserve FOMC US dollar rate decision news today');
+  }
+
+  return queries;
 }
 
 async function fetchAllNews(symbol: string): Promise<NewsContext[]> {
@@ -75,48 +181,36 @@ async function fetchAllNews(symbol: string): Promise<NewsContext[]> {
 
   try {
     const zai = await ZAI.create();
-
-    // Fetch symbol-specific news and macro news in parallel
-    const isCrypto = symbol.includes('BTC') || symbol.includes('ETH');
-    const isGold = symbol.includes('XAU');
-    const isJPY = symbol.includes('JPY');
-
-    const queries: string[] = [
-      `${symbol} analysis forecast today`,                   // Symbol specific
-      `forex market news today ${new Date().toISOString().slice(0, 10)}`, // General forex
-    ];
-
-    // Add macro context queries based on the pair
-    if (isJPY) queries.push('Bank of Japan yen policy news');
-    if (isCrypto) queries.push('cryptocurrency bitcoin price news');
-    if (isGold) queries.push('gold price XAUUSD news today');
-    if (symbol.includes('EUR')) queries.push('ECB euro interest rate news');
-    if (symbol.includes('GBP')) queries.push('Bank of England pound sterling news');
-    if (symbol.includes('USD') && !isCrypto && !isGold) queries.push('Federal Reserve US dollar interest rate news');
+    const queries = buildNewsQueries(symbol);
 
     // Fetch first 2 queries in parallel (most important)
-    const [symbolNews, marketNews] = await Promise.allSettled([
+    const [primaryNews, secondaryNews] = await Promise.allSettled([
       fetchNewsFromWeb(zai, queries[0], 4),
-      fetchNewsFromWeb(zai, queries[1], 3),
+      queries.length > 1 ? fetchNewsFromWeb(zai, queries[1], 3) : Promise.resolve([] as NewsContext[]),
     ]);
 
-    if (symbolNews.status === 'fulfilled') allNews = [...symbolNews.value];
-    if (marketNews.status === 'fulfilled') allNews = [...allNews, ...marketNews.value];
+    if (primaryNews.status === 'fulfilled') allNews = [...primaryNews.value];
+    if (secondaryNews.status === 'fulfilled') allNews = [...allNews, ...secondaryNews.value];
 
-    // Fetch macro query if available (lower priority)
+    // Fetch macro/central bank query (if different from above)
     if (queries.length > 2) {
       const macroResult = await fetchNewsFromWeb(zai, queries[2], 3);
       allNews = [...allNews, ...macroResult];
     }
 
-    // Deduplicate by title (similar titles from different sources)
+    // Deduplicate by title similarity
     const seen = new Set<string>();
     allNews = allNews.filter(n => {
-      const key = n.title.toLowerCase().slice(0, 50);
+      const key = n.title.toLowerCase().slice(0, 60);
       if (seen.has(key)) return false;
       seen.add(key);
-      return n.title.length > 10; // Skip empty/weak titles
+      return true;
     });
+
+    // Sort by source quality (best first)
+    allNews.sort((a, b) => b.score - a.score);
+
+    console.log(`[AI Agent] News for ${symbol}: ${allNews.length} articles, sources: [${allNews.map(n => n.source).join(', ')}]`);
   } catch (error) {
     console.error('[AI Agent] News aggregation failed:', error);
   }
@@ -320,8 +414,12 @@ ${priceAction || 'Insufficient data for price action analysis.'}
 
 ### NEWS & FUNDAMENTAL CONTEXT (${news.length} articles)
 ${news.length > 0
-    ? news.map((n, i) => `${i + 1}. **[${n.source}]** ${n.title}\n   > ${n.snippet}`).join('\n\n')
+    ? news.map((n, i) => {
+        const tier = n.score >= 90 ? '🔴 HIGH' : n.score >= 70 ? '🟡 MED' : '🟢 LOW';
+        return `${i + 1}. [${tier} RELIABILITY] **[${n.source}]** ${n.title}\n   > ${n.snippet}`;
+      }).join('\n\n')
     : '⚠️ No recent news available — proceed with technical analysis only.'}
+NOTE: Prioritize 🔴 HIGH reliability sources (Reuters, Bloomberg, CNBC) for trading decisions. Lower reliability sources should only confirm, not drive decisions.
 
 ### RISK PARAMETERS
 - Account Balance: $${balance.toFixed(2)}
@@ -428,6 +526,7 @@ async function queryAI(
             ? `Risk/reward ${riskReward.toFixed(2)} below minimum 1.5:1`
             : undefined,
       newsUsed: news.length,
+      newsSources: news.map(n => n.source),
       analyzedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -464,6 +563,7 @@ function fallbackDecision(
     shouldTrade: false,
     skipReason: reason,
     newsUsed: 0,
+    newsSources: [],
     analyzedAt: new Date().toISOString(),
   };
 }

@@ -56,6 +56,7 @@ export interface AIAnalysis {
   shouldTrade: boolean;
   skipReason?: string;
   newsUsed: number;
+  newsSources: string[];   // Actual domain names of news articles used
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
