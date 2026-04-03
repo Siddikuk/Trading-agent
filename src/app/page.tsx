@@ -18,6 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import CandlestickChart, { type CandleData, type IndicatorData } from '@/components/trading/CandlestickChart';
 import TickerStrip from '@/components/trading/TickerStrip';
 import SettingsDialog from '@/components/trading/SettingsDialog';
+import MT5SetupWizard from '@/components/trading/MT5SetupWizard';
 import NewTradeDialog from '@/components/trading/NewTradeDialog';
 import SignalAnalysis from '@/components/trading/SignalAnalysis';
 import PriceAlerts from '@/components/trading/PriceAlerts';
@@ -55,6 +56,7 @@ export default function TradingTerminal() {
   const [scanLog, setScanLog] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState('trades');
   const [showSettings, setShowSettings] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -472,8 +474,10 @@ export default function TradingTerminal() {
         updateAgent={updateAgent}
         mt5BridgeUrl={mt5BridgeUrl} mt5Connected={mt5Connected}
         onSetBridgeUrl={handleSetBridgeUrl} onTestBridge={handleTestBridge}
+        onOpenWizard={() => setShowWizard(true)}
       />
       <NewTradeDialog open={tradeDialogOpen} onOpenChange={setTradeDialogOpen} form={tradeForm} setForm={setTradeForm} submitting={tradeSubmitting} onSubmit={createTrade} quotes={quotes} />
+      <MT5SetupWizard open={showWizard} onOpenChange={setShowWizard} onComplete={(url) => { handleSetBridgeUrl(url); setShowWizard(false); toast({ title: 'MT5 Connected!', description: 'Live data is now flowing' }); }} />
 
       {/* HEADER */}
       <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-50">
@@ -533,6 +537,7 @@ export default function TradingTerminal() {
                 onClosePosition={handleMT5ClosePosition}
                 onCloseAll={handleMT5CloseAll}
                 onRefresh={fetchMT5Data}
+                onOpenWizard={() => setShowWizard(true)}
               />
             </TabsContent>
             <TabsContent value="news" className="flex-1 m-0 overflow-y-auto"><NewsTab news={news} loading={newsLoading} onRefresh={fetchNews} /></TabsContent>

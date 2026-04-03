@@ -29,13 +29,14 @@ interface SettingsDialogProps {
   mt5Connected: boolean;
   onSetBridgeUrl: (url: string) => void;
   onTestBridge: () => void;
+  onOpenWizard: () => void;
 }
 
 export default function SettingsDialog({
   open, onOpenChange, strategiesEnabled, setStrategiesEnabled,
   scanInterval, setScanInterval, defaultLotSize, setDefaultLotSize,
   maxConcurrent, setMaxConcurrent, updateAgent,
-  mt5BridgeUrl, mt5Connected, onSetBridgeUrl, onTestBridge,
+  mt5BridgeUrl, mt5Connected, onSetBridgeUrl, onTestBridge, onOpenWizard,
 }: SettingsDialogProps) {
   const [bridgeUrlInput, setBridgeUrlInput] = useState('');
   const [bridgeTesting, setBridgeTesting] = useState(false);
@@ -79,6 +80,11 @@ export default function SettingsDialog({
               )}>
                 {mt5Connected ? 'Connected' : 'Disconnected'}
               </Badge>
+              {!mt5Connected && (
+                <Button variant="ghost" size="sm" className="h-6 text-[10px] text-primary ml-auto" onClick={onOpenWizard}>
+                  Setup Guide
+                </Button>
+              )}
             </div>
             <div className="flex gap-2">
               <Input

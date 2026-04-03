@@ -212,3 +212,36 @@ Stage Summary:
 - Professional MT5 tab with account overview, live positions, trade execution
 - Bridge relay mini-service ready for deployment (separate start)
 - No build commands run (per instructions) — requires `npx next build` + restart
+
+---
+Task ID: 1
+Agent: MT5SetupWizard Builder
+Task: Build visual MT5 setup wizard component
+
+Work Log:
+- Read worklog.md for full project context (15 prior tasks)
+- Reviewed available shadcn/ui components (45+ in src/components/ui/)
+- Studied existing SettingsDialog, Dialog, Progress, Button, Input components
+- Created src/components/trading/MT5SetupWizard.tsx (594 lines)
+
+Component details:
+- 'use client' component wrapped in Dialog from shadcn/ui
+- 8-step wizard: Connect VPS, Install Python, Upload Bridge, Install Deps, Open Firewall, Start Bridge, Make Permanent, Connect Dashboard
+- Each step has: numbered indicator, icon, title, child-friendly explanation, copyable code blocks
+- Progress bar with step dots showing completion state (CheckCircle2 green for done, Circle for pending)
+- CodeBlock sub-component with clipboard copy button (navigator.clipboard + fallback)
+- Step 8 has VPS IP + Port inputs, Test Connection button calling /api/forex/mt5/config
+- Success/failure feedback with colored alert boxes
+- Celebration state on successful connection (PartyPopper icon + confetti emoji)
+- Previous/Next/Skip navigation buttons
+- Dark gradient header with emerald accent theme
+- Responsive design (sm: breakpoints for layout shifts)
+- State resets on dialog close for clean re-use
+- Props interface: open, onOpenChange, onComplete(bridgeUrl)
+- Uses only existing shadcn/ui components and lucide-react icons
+- Lint clean (0 new errors; 3 pre-existing errors in daemon.js)
+
+Stage Summary:
+- New component: src/components/trading/MT5SetupWizard.tsx (594 lines)
+- Ready for integration into SettingsDialog or page.tsx
+- No new packages installed

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { Radio, Plug, Unplug, RefreshCw, CircleDot, X, AlertTriangle, DollarSign, TrendingUp, Shield, BarChart3 } from 'lucide-react';
+import { Radio, Plug, Unplug, RefreshCw, CircleDot, X, AlertTriangle, DollarSign, TrendingUp, Shield, BarChart3, BookOpen } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,11 +19,12 @@ interface MT5TabProps {
   onClosePosition: (ticket: number) => void;
   onCloseAll: () => void;
   onRefresh: () => void;
+  onOpenWizard?: () => void;
 }
 
 export default function MT5Tab({
   connected, account, positions, onConnect, onDisconnect,
-  onClosePosition, onCloseAll, onRefresh,
+  onClosePosition, onCloseAll, onRefresh, onOpenWizard,
 }: MT5TabProps) {
   const [bridgeUrl, setBridgeUrl] = useState('');
   const [connecting, setConnecting] = useState(false);
@@ -268,9 +269,20 @@ export default function MT5Tab({
           <CardContent className="py-10 text-center">
             <Radio className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-1">MT5 Bridge Not Connected</p>
-            <p className="text-[11px] text-muted-foreground/70 max-w-xs mx-auto">
+            <p className="text-[11px] text-muted-foreground/70 max-w-xs mx-auto mb-4">
               Connect to your MT5 Python bridge to view live positions, account data, and execute trades in real-time.
             </p>
+            {onOpenWizard && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs"
+                onClick={onOpenWizard}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                Setup Guide
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
