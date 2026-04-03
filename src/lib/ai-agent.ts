@@ -393,8 +393,10 @@ const TRADING_SYSTEM_PROMPT = `You are an elite forex/commodities/crypto trading
 2. Never recommend a trade with confidence below 50%. If unsure, HOLD.
 3. If news sentiment strongly contradicts technicals, favor the news (fundamentals > technicals in the short term).
 4. When multiple timeframes show conflicting trends, be cautious — lower confidence.
-5. Always use ATR for stop-loss placement. Risk 1.5-2x ATR, Reward 2-3x ATR (minimum 1.5:1 R:R).
+5. Always use ATR for stop-loss placement. Risk 1-1.5x ATR, Reward 3-4x ATR (minimum 2:1 R:R, aim for 3:1).
 6. CAPITAL PRESERVATION > catching every move. When in doubt, HOLD.
+7. If the risk/reward is below 2:1, DO NOT TRADE — widen the take-profit or tighten the stop to hit 2:1 minimum.
+8. For BTC/crypto: use wider stops (1.5-2x ATR) but require 3:1 R:R minimum due to volatility.
 
 ## RESPONSE FORMAT (strict JSON):
 {
@@ -402,7 +404,7 @@ const TRADING_SYSTEM_PROMPT = `You are an elite forex/commodities/crypto trading
   "confidence": 50-95,
   "entryPrice": <current price as number>,
   "stopLoss": <number, based on ATR>,
-  "takeProfit": <number, minimum 1.5:1 risk/reward>,
+  "takeProfit": <number, minimum 2:1 risk/reward, aim for 3:1>,
   "sentimentScore": <-100 to 100, negative=bearish, positive=bullish>,
   "reasoning": "<Your detailed analysis: go through each framework step above, explain what you see, and conclude with your decision. 2-4 sentences minimum.>",
   "skipReason": "<If HOLD, explain why concisely. null if trading.>"
@@ -558,13 +560,13 @@ async function queryAI(
     const confidence = Math.max(0, Math.min(100, Number(parsed.confidence) || 0));
     const sentimentScore = Math.max(-100, Math.min(100, Number(parsed.sentimentScore) || 0));
 
-    // Calculate SL/TP — use AI values if reasonable, otherwise ATR-based defaults
+    // Calculate SL/TP — tighter stops, wider targets for better R:R (aim 2.5-3:1)
     const defaultSL = direction === 'BUY'
-      ? Math.round((price - atr * 1.5) * 100000) / 100000
-      : Math.round((price + atr * 1.5) * 100000) / 100000;
+      ? Math.round((price - atr * 1.2) * 100000) / 100000
+      : Math.round((price + atr * 1.2) * 100000) / 100000;
     const defaultTP = direction === 'BUY'
-      ? Math.round((price + atr * 2.5) * 100000) / 100000
-      : Math.round((price - atr * 2.5) * 100000) / 100000;
+      ? Math.round((price + atr * 3.5) * 100000) / 100000
+      : Math.round((price - atr * 3.5) * 100000) / 100000;
 
     const validateSL = (v: number) => v > 0 && Math.abs(v - price) > 0 && Math.abs(v - price) < atr * 5;
     const validateTP = (v: number) => v > 0 && Math.abs(v - price) > 0 && Math.abs(v - price) < atr * 10;
@@ -578,8 +580,8 @@ async function queryAI(
     const riskReward = calcRiskReward(price, finalSL, finalTP);
     const lotSize = calcPositionSize(balance, riskPercent, price, finalSL);
 
-    // Final decision gate: need confidence >= 50 AND risk/reward >= 1.5
-    const shouldTrade = direction !== 'HOLD' && confidence >= 50 && riskReward >= 1.5;
+    // Final decision gate: need confidence >= 60 AND risk/reward >= 2.0
+    const shouldTrade = direction !== 'HOLD' && confidence >= 60 && riskReward >= 2.0;
 
     return {
       symbol,
@@ -597,8 +599,8 @@ async function queryAI(
         ? String(parsed.skipReason || 'Insufficient confidence or conflicting signals')
         : !shouldTrade && confidence < 50
           ? `Confidence ${confidence}% below minimum 50%`
-          : !shouldTrade && riskReward < 1.5
-            ? `Risk/reward ${riskReward.toFixed(2)} below minimum 1.5:1`
+          : !shouldTrade && riskReward < 2.0
+            ? `Risk/reward ${riskReward.toFixed(2)} below minimum 2:1`
             : undefined,
       newsUsed: news.length,
       newsSources: news.map(n => n.source),
