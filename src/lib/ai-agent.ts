@@ -523,20 +523,43 @@ async function queryAI(
   try {
     const zai = await ZAI.create();
 
-    // LLM call with timeout protection
-    const completionPromise = zai.chat.completions.create({
-      messages: [
-        { role: 'assistant', content: TRADING_SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-      thinking: { type: 'disabled' },
-    });
+    // LLM call with timeout + retry on rate limit (429)
+    let completion: Awaited<ReturnType<typeof zai.chat.completions.create>>;
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const completionPromise = zai.chat.completions.create({
+          messages: [
+            { role: 'assistant', content: TRADING_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          thinking: { type: 'disabled' },
+        });
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('LLM timeout after 60s')), 60000)
-    );
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('LLM timeout after 60s')), 60000)
+        );
 
-    const completion = await Promise.race([completionPromise, timeoutPromise]);
+        completion = await Promise.race([completionPromise, timeoutPromise]);
+        lastError = null;
+        break; // Success — exit retry loop
+      } catch (err) {
+        const msg = String(err);
+        lastError = err instanceof Error ? err : new Error(msg);
+        // Only retry on rate limit (429) — fail fast on everything else
+        if (msg.includes('429') || msg.includes('Too many requests')) {
+          const waitTime = (attempt + 1) * 8000; // 8s, 16s, 24s backoff
+          console.warn(`[AI Agent] Rate limited (attempt ${attempt + 1}/3), retrying in ${waitTime / 1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else {
+          break; // Not a rate limit error — don't retry
+        }
+      }
+    }
+
+    if (lastError || !completion) {
+      throw lastError || new Error('LLM call failed after retries');
+    }
     const raw = completion.choices[0]?.message?.content || '';
 
     // Parse JSON — handle markdown code blocks and raw JSON

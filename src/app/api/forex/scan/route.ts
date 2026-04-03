@@ -3,6 +3,9 @@ import { db } from '@/lib/db';
 import { analyzeWithAI, type AIDecision } from '@/lib/ai-agent';
 import { yahooSymbol } from '@/lib/trading-engine';
 
+// Delay helper to avoid API rate limits
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -49,8 +52,10 @@ export async function POST(req: Request) {
 
     let newTrades = 0;
     const results: Record<string, Record<string, unknown>> = {};
+    const startTime = Date.now();
 
-    for (const displaySym of symList) {
+    for (let i = 0; i < symList.length; i++) {
+      const displaySym = symList[i];
       try {
         // Skip if already have open position on this symbol
         const existingOpen = await db.trade.findFirst({ where: { symbol: displaySym, status: 'OPEN' } });
@@ -59,7 +64,16 @@ export async function POST(req: Request) {
           continue;
         }
 
+        // Rate limit: wait 5 seconds between pairs to avoid 429 errors
+        // Each pair does 1 LLM call + ~4 web searches = 5 API calls
+        // 5 second gap keeps us safely under rate limits
+        if (i > 0) {
+          console.log(`[Scan] Waiting 5s before analyzing ${displaySym} (rate limit protection)...`);
+          await delay(5000);
+        }
+
         // AI ANALYSIS — this is the brain
+        console.log(`[Scan] Analyzing ${displaySym} ${tf} (${i + 1}/${symList.length})...`);
         const decision: AIDecision = await analyzeWithAI(
           displaySym,
           tf,
@@ -67,6 +81,9 @@ export async function POST(req: Request) {
           agentState.maxRiskPercent,
           true // enable news
         );
+
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`[Scan] ${displaySym}: ${decision.direction} @ ${decision.confidence}% (R:R ${decision.riskRewardRatio}:1) [${elapsed}s]`);
 
         if (!decision.shouldTrade) {
           results[displaySym] = {
@@ -147,9 +164,20 @@ export async function POST(req: Request) {
         newTrades++;
       } catch (e) {
         console.error(`[Scan] Error for ${displaySym}:`, e);
-        results[displaySym] = { error: String(e) };
+        const errMsg = String(e);
+        // If rate limited, wait extra and mark as rate-limited (not a hard error)
+        if (errMsg.includes('429') || errMsg.includes('Too many requests')) {
+          console.log(`[Scan] Rate limited on ${displaySym}, waiting 15s before continuing...`);
+          await delay(15000);
+          results[displaySym] = { skipped: 'Rate limited — skipped this round' };
+        } else {
+          results[displaySym] = { error: errMsg.slice(0, 200) };
+        }
       }
     }
+
+    const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`[Scan] Complete: ${symList.length} pairs in ${totalElapsed}s, ${newTrades} trades opened`);
 
     // Update agent last scan
     await db.agentState.update({ where: { id: 'main' }, data: { lastScanAt: new Date() } });
@@ -159,6 +187,7 @@ export async function POST(req: Request) {
       scanned: symList.length,
       newTrades,
       dailyPnL: Math.round(dailyPnL * 100) / 100,
+      elapsed: totalElapsed + 's',
       results,
       scannedAt: new Date().toISOString(),
     });
