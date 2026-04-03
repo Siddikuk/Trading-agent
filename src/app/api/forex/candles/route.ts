@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchCandles } from '@/lib/market-data';
 import { yahooSymbol, getAllIndicators } from '@/lib/trading-engine';
+import { isMT5Connected } from '@/lib/mt5-provider';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -9,10 +10,12 @@ export async function GET(req: Request) {
   const limit = searchParams.get('limit');
 
   try {
+    // Check if MT5 will be used (fetchCandles tries MT5 first internally)
+    const mt5Used = await isMT5Connected();
     const sym = yahooSymbol(symbolParam);
     const candles = await fetchCandles(sym, timeframe, limit ? parseInt(limit) : undefined);
     if (candles.length === 0) {
-      return NextResponse.json({ error: 'No candle data available', symbol: sym, timeframe }, { status: 502 });
+      return NextResponse.json({ error: 'No candle data available', symbol: sym, timeframe, dataSource: mt5Used ? 'MT5' : 'Yahoo' }, { status: 502 });
     }
 
     const indicators = getAllIndicators(candles);
@@ -24,6 +27,7 @@ export async function GET(req: Request) {
       candleCount: candles.length,
       currentPrice: candles[candles.length - 1].close,
       indicators,
+      dataSource: mt5Used ? 'MT5' : 'Yahoo',
       candles: candles.map(c => ({
         time: c.time,
         open: +c.open.toFixed(5),

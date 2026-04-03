@@ -1,11 +1,12 @@
 {
   "name": "mt5-bridge",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "bun --hot index.ts"
   },
   "dependencies": {
-    "socket.io": "^4.7.0"
+    "socket.io": "^4.7.0",
+    "socket.io-client": "^4.7.0"
   }
 }

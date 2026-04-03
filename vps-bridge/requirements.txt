@@ -1,0 +1,12 @@
+# MT5 Bridge Server - Requirements
+# Install with: pip install -r requirements.txt
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# MT5 integration
+MetaTrader5>=5.0.4600
+
+# Utilities
+pytz>=2024.1

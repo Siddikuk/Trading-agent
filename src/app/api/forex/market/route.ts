@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchQuote, fetchMultipleQuotes } from '@/lib/market-data';
 import { DEFAULT_SYMBOLS, yahooSymbol } from '@/lib/trading-engine';
+import { isMT5Connected } from '@/lib/mt5-provider';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -8,12 +9,24 @@ export async function GET(req: Request) {
   const single = searchParams.get('symbol');
 
   try {
+    let mt5Used = false;
+
     if (single) {
+      // For single symbol, check MT5 first
+      mt5Used = await isMT5Connected();
       const sym = yahooSymbol(single);
       const quote = await fetchQuote(sym);
       if (!quote) return NextResponse.json({ error: 'Failed to fetch quote' }, { status: 502 });
-      return NextResponse.json({ symbol: single, yahooSymbol: sym, ...quote });
+      return NextResponse.json({
+        symbol: single,
+        yahooSymbol: sym,
+        ...quote,
+        dataSource: mt5Used ? 'MT5' : 'Yahoo',
+      });
     }
+
+    // Check if MT5 is available
+    mt5Used = await isMT5Connected();
 
     // Keep the original display names (e.g. "EUR/USD") alongside Yahoo symbols (e.g. "EURUSD=X")
     const displaySymbols = symbolsParam
@@ -36,7 +49,11 @@ export async function GET(req: Request) {
       previousClose: q.previousClose,
     }));
 
-    return NextResponse.json({ data: results, fetchedAt: new Date().toISOString() });
+    return NextResponse.json({
+      data: results,
+      dataSource: mt5Used ? 'MT5' : 'Yahoo',
+      fetchedAt: new Date().toISOString(),
+    });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

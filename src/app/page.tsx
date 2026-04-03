@@ -28,7 +28,7 @@ import NewsTab from '@/components/trading/NewsTab';
 import StatsTab from '@/components/trading/StatsTab';
 import ScanLog from '@/components/trading/ScanLog';
 import Footer from '@/components/trading/Footer';
-import type { Quote, Trade, AgentState, SignalResult, AIAnalysis, NewsItem, PriceAlert, PerformanceStats } from '@/components/trading/types';
+import type { Quote, Trade, AgentState, SignalResult, AIAnalysis, NewsItem, PriceAlert, PerformanceStats, MT5Account, MT5Position, DataSource } from '@/components/trading/types';
 import { SYMBOLS, TIMEFRAMES } from '@/components/trading/types';
 
 // ==================== MAIN APP ====================
@@ -49,8 +49,6 @@ export default function TradingTerminal() {
   const aiAbortRef = useRef<AbortController | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradeStats, setTradeStats] = useState<Record<string, unknown> | null>(null);
-  const [mt5Connected, setMt5Connected] = useState(false);
-  const [mt5Orders, setMt5Orders] = useState<unknown[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
@@ -59,13 +57,20 @@ export default function TradingTerminal() {
   const [showSettings, setShowSettings] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // prevMt5Ref removed - MT5 connection handled by bridge service
 
   // Settings state
   const [strategiesEnabled, setStrategiesEnabled] = useState({ RSI: true, MACD: true, Bollinger: true, Trend: true });
   const [scanInterval, setScanInterval] = useState(120);
   const [defaultLotSize, setDefaultLotSize] = useState(0.1);
   const [maxConcurrent, setMaxConcurrent] = useState(3);
+
+  // MT5 state
+  const [mt5BridgeUrl, setMt5BridgeUrl] = useState<string | null>(null);
+  const [mt5Connected, setMt5Connected] = useState(false);
+  const [mt5Account, setMt5Account] = useState<MT5Account | null>(null);
+  const [mt5Positions, setMt5Positions] = useState<MT5Position[]>([]);
+  const [dataSource, setDataSource] = useState<DataSource>(null);
+  const mt5SocketRef = useRef<unknown>(null);
 
   // News / perf / alerts state
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -82,8 +87,161 @@ export default function TradingTerminal() {
   const [tradeForm, setTradeForm] = useState({ symbol: 'EUR/USD', direction: 'BUY', lotSize: 0.1, entryPrice: '', stopLoss: '', takeProfit: '', strategy: 'Manual' });
   const [tradeSubmitting, setTradeSubmitting] = useState(false);
 
+  // ==================== MT5 BRIDGE CONNECTION ====================
+  const connectMT5Socket = useCallback((url: string) => {
+    // Disconnect existing socket
+    if (mt5SocketRef.current) {
+      try { (mt5SocketRef.current as { disconnect: () => void }).disconnect(); } catch {}
+      mt5SocketRef.current = null;
+    }
+
+    try {
+      // Dynamic import of socket.io-client (it's a peer dep, install if needed)
+      // Using native WebSocket fallback for the relay connection
+      const socketUrl = url.replace(/^http/, 'ws');
+      const ws = new WebSocket(socketUrl);
+
+      ws.onopen = () => {
+        console.log('[MT5] WebSocket connected to relay');
+        setMt5Connected(true);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          // Handle socket.io packet format
+          if (data.type === 0 && data.data && Array.isArray(data.data) && data.data.length >= 2) {
+            const eventName = data.data[0] as string;
+            const eventData = data.data[1] as Record<string, unknown>;
+
+            switch (eventName) {
+              case 'mt5_status':
+                setMt5Connected(eventData.connected === true);
+                break;
+              case 'quotes_update':
+                // Refresh quotes when live data arrives
+                if (eventData.quotes) {
+                  fetchQuotes();
+                }
+                break;
+              case 'positions_update':
+                if (eventData.positions) {
+                  setMt5Positions(eventData.positions as MT5Position[]);
+                }
+                break;
+              case 'account_update':
+                if (eventData.balance !== undefined) {
+                  setMt5Account(eventData as unknown as MT5Account);
+                }
+                break;
+              case 'order_result':
+                if (eventData.success) {
+                  toast({ title: 'Order Executed', description: `Ticket #${eventData.ticket}` });
+                  fetchMT5Data();
+                } else {
+                  toast({ title: 'Order Failed', description: eventData.error, variant: 'destructive' });
+                }
+                break;
+              case 'close_result':
+                if (eventData.success) {
+                  toast({ title: 'Position Closed', description: `Profit: $${(eventData.profit ?? 0).toFixed(2)}` });
+                  fetchMT5Data();
+                } else {
+                  toast({ title: 'Close Failed', description: eventData.error, variant: 'destructive' });
+                }
+                break;
+            }
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        console.log('[MT5] WebSocket disconnected from relay');
+        setMt5Connected(false);
+      };
+
+      ws.onerror = () => {
+        console.error('[MT5] WebSocket error');
+        setMt5Connected(false);
+      };
+
+      mt5SocketRef.current = ws;
+    } catch (e) {
+      console.error('[MT5] Failed to connect:', e);
+      setMt5Connected(false);
+    }
+  }, [toast]);
+
+  const disconnectMT5Socket = useCallback(() => {
+    if (mt5SocketRef.current) {
+      try { (mt5SocketRef.current as { disconnect: () => void }).disconnect(); } catch {}
+      mt5SocketRef.current = null;
+    }
+    setMt5Connected(false);
+    setMt5Account(null);
+    setMt5Positions([]);
+  }, []);
+
+  const sendMT5SocketEvent = useCallback((eventName: string, data?: unknown) => {
+    const ws = mt5SocketRef.current as WebSocket | null;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // socket.io-engine packet format: type 2 = EVENT
+    ws.send(JSON.stringify({ type: 2, data: data ? [eventName, data] : [eventName], nsp: '/' }));
+  }, []);
+
+  // Initialize MT5 from localStorage
+  useEffect(() => {
+    const savedUrl = localStorage.getItem('mt5_bridge_url');
+    if (savedUrl) {
+      setMt5BridgeUrl(savedUrl);
+    }
+  }, []);
+
+  // Connect MT5 when URL is set and tab is viewed
+  useEffect(() => {
+    if (mt5BridgeUrl && activeTab === 'mt5') {
+      connectMT5Socket(mt5BridgeUrl);
+    }
+    return () => {
+      // Don't disconnect on tab switch, keep alive
+    };
+  }, [mt5BridgeUrl, activeTab, connectMT5Socket]);
+
+  const fetchMT5Data = useCallback(async () => {
+    if (!mt5Connected) return;
+    try {
+      const [accRes, posRes] = await Promise.allSettled([
+        fetch('/api/forex/mt5/account'),
+        fetch('/api/forex/mt5/positions'),
+      ]);
+      if (accRes.status === 'fulfilled' && accRes.value.ok) {
+        const accData = await accRes.value.json();
+        if (accData.balance !== undefined) setMt5Account(accData);
+      }
+      if (posRes.status === 'fulfilled' && posRes.value.ok) {
+        const posData = await posRes.value.json();
+        if (posData.positions) setMt5Positions(posData.positions);
+      }
+    } catch {}
+  }, [mt5Connected]);
+
+  // Auto-refresh MT5 data every 5s when connected
+  useEffect(() => {
+    if (!mt5Connected) return;
+    const interval = setInterval(fetchMT5Data, 5000);
+    return () => clearInterval(interval);
+  }, [mt5Connected, fetchMT5Data]);
+
   // ==================== DATA FETCHING ====================
-  const fetchQuotes = useCallback(async () => { try { const r = await fetch('/api/forex/market'); const d = await r.json(); if (d.data) setQuotes(d.data); } catch {} }, []);
+  const fetchQuotes = useCallback(async () => {
+    try {
+      const r = await fetch('/api/forex/market');
+      const d = await r.json();
+      if (d.data) setQuotes(d.data);
+      if (d.dataSource) setDataSource(d.dataSource as DataSource);
+    } catch {}
+  }, []);
+
   const fetchAgentState = useCallback(async () => { try { const r = await fetch('/api/forex/agent'); const d = await r.json(); if (d.state) setAgentState(d.state); } catch {} }, []);
   const fetchTrades = useCallback(async () => { try { const r = await fetch('/api/forex/trades'); const d = await r.json(); if (d.trades) setTrades(d.trades); if (d.stats) setTradeStats(d.stats); } catch {} }, []);
   const fetchNews = useCallback(async () => { setNewsLoading(true); try { const r = await fetch('/api/forex/news'); const d = await r.json(); if (d.results) setNews(d.results); } catch {} setNewsLoading(false); }, []);
@@ -110,7 +268,6 @@ export default function TradingTerminal() {
   const analyzeSymbolWithAI = useCallback(async (symbol: string, tf: string) => {
     setIsAIAnalyzing(true);
     setAiAnalysis(null);
-    // Abort previous AI call if still running
     if (aiAbortRef.current) aiAbortRef.current.abort();
     const ctrl = new AbortController();
     aiAbortRef.current = ctrl;
@@ -119,9 +276,7 @@ export default function TradingTerminal() {
       const d = await r.json();
       if (d.aiAnalysis) {
         setAiAnalysis(d.aiAnalysis);
-        // Update combined signal with AI decision
         if (d.combinedSignal) setCombinedSignal(d.combinedSignal);
-        // Play alert on strong AI signal
         if (d.aiAnalysis.shouldTrade && d.aiAnalysis.confidence >= 70 && soundEnabled) {
           playAlert('AI ' + d.aiAnalysis.direction + ' ' + symbol + ' ' + d.aiAnalysis.confidence + '% confidence');
         }
@@ -186,9 +341,94 @@ export default function TradingTerminal() {
 
   const deleteAlert = async (id: string) => { try { await fetch('/api/forex/alerts?id=' + id, { method: 'DELETE' }); fetchAlerts(); } catch {} };
 
+  // ==================== MT5 HANDLERS ====================
+  const handleSetBridgeUrl = useCallback(async (url: string) => {
+    // Save to localStorage
+    localStorage.setItem('mt5_bridge_url', url);
+    setMt5BridgeUrl(url);
+
+    // Save to server config
+    try {
+      await fetch('/api/forex/mt5/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+    } catch {}
+
+    // Connect
+    connectMT5Socket(url);
+    toast({ title: 'MT5 Bridge', description: 'Configuring bridge connection...' });
+  }, [connectMT5Socket, toast]);
+
+  const handleTestBridge = useCallback(async () => {
+    try {
+      const r = await fetch('/api/forex/mt5/config');
+      const d = await r.json();
+      if (d.connected) {
+        toast({ title: 'MT5 Bridge', description: 'Connection successful!' });
+        setMt5Connected(true);
+      } else {
+        toast({ title: 'MT5 Bridge', description: 'Connection failed', variant: 'destructive' });
+        setMt5Connected(false);
+      }
+    } catch {
+      toast({ title: 'MT5 Bridge', description: 'Could not reach bridge', variant: 'destructive' });
+      setMt5Connected(false);
+    }
+  }, [toast]);
+
+  const handleMT5Connect = useCallback((url: string) => {
+    handleSetBridgeUrl(url);
+  }, [handleSetBridgeUrl]);
+
+  const handleMT5Disconnect = useCallback(() => {
+    disconnectMT5Socket();
+    localStorage.removeItem('mt5_bridge_url');
+    setMt5BridgeUrl(null);
+    toast({ title: 'MT5 Bridge', description: 'Disconnected' });
+  }, [disconnectMT5Socket, toast]);
+
+  const handleMT5ClosePosition = useCallback(async (ticket: number) => {
+    try {
+      const r = await fetch('/api/forex/mt5/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast({ title: 'Position Closed', description: `Ticket #${ticket} · $${(d.profit ?? 0).toFixed(2)}` });
+        fetchMT5Data();
+      } else {
+        toast({ title: 'Close Failed', description: d.error || 'Unknown error', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to close position', variant: 'destructive' });
+    }
+  }, [fetchMT5Data, toast]);
+
+  const handleMT5CloseAll = useCallback(async () => {
+    try {
+      const r = await fetch('/api/forex/mt5/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: 'ALL', type: 'ALL' }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast({ title: 'All Positions Closed' });
+        fetchMT5Data();
+      } else {
+        toast({ title: 'Close Failed', description: d.error || 'Unknown error', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to close positions', variant: 'destructive' });
+    }
+  }, [fetchMT5Data, toast]);
+
   // ==================== EFFECTS ====================
   useEffect(() => { fetchQuotes(); fetchAgentState(); fetchTrades(); }, [fetchQuotes, fetchAgentState, fetchTrades]);
-  // On symbol/timeframe change: load chart instantly, then trigger AI analysis
   useEffect(() => { analyzeSymbol(); }, [selectedSymbol, timeframe, analyzeSymbol]);
   useEffect(() => { analyzeSymbolWithAI(selectedSymbol, timeframe); }, [selectedSymbol, timeframe]);
   useEffect(() => { const i = setInterval(fetchQuotes, 30000); return () => clearInterval(i); }, [fetchQuotes]);
@@ -196,10 +436,6 @@ export default function TradingTerminal() {
     if (agentState?.isRunning && agentState.autoTrade) { scanIntervalRef.current = setInterval(runScan, scanInterval * 1000); return () => { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); }; }
     else { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); }
   }, [agentState?.isRunning, agentState?.autoTrade, runScan, scanInterval]);
-
-  // MT5 Bridge - will be connected when the MT5 mini-service is running
-  // MT5 connection is established via Socket.io to the bridge service on port 3005
-  // For now, the connection status defaults to false until the bridge is deployed
 
   useEffect(() => {
     if (activeTab === 'news' && news.length === 0) fetchNews();
@@ -227,7 +463,16 @@ export default function TradingTerminal() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <audio ref={audioRef} className="hidden" />
-      <SettingsDialog open={showSettings} onOpenChange={setShowSettings} strategiesEnabled={strategiesEnabled} setStrategiesEnabled={setStrategiesEnabled} scanInterval={scanInterval} setScanInterval={setScanInterval} defaultLotSize={defaultLotSize} setDefaultLotSize={setDefaultLotSize} maxConcurrent={maxConcurrent} setMaxConcurrent={setMaxConcurrent} updateAgent={updateAgent} />
+      <SettingsDialog
+        open={showSettings} onOpenChange={setShowSettings}
+        strategiesEnabled={strategiesEnabled} setStrategiesEnabled={setStrategiesEnabled}
+        scanInterval={scanInterval} setScanInterval={setScanInterval}
+        defaultLotSize={defaultLotSize} setDefaultLotSize={setDefaultLotSize}
+        maxConcurrent={maxConcurrent} setMaxConcurrent={setMaxConcurrent}
+        updateAgent={updateAgent}
+        mt5BridgeUrl={mt5BridgeUrl} mt5Connected={mt5Connected}
+        onSetBridgeUrl={handleSetBridgeUrl} onTestBridge={handleTestBridge}
+      />
       <NewTradeDialog open={tradeDialogOpen} onOpenChange={setTradeDialogOpen} form={tradeForm} setForm={setTradeForm} submitting={tradeSubmitting} onSubmit={createTrade} quotes={quotes} />
 
       {/* HEADER */}
@@ -244,7 +489,7 @@ export default function TradingTerminal() {
             <div className={cn('flex items-center gap-1.5 text-xs', mt5Connected ? 'text-emerald-400' : 'text-red-400')}>{mt5Connected ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}<span className="hidden sm:inline">MT5</span></div>
           </div>
         </div>
-        <TickerStrip quotes={quotes} selectedSymbol={selectedSymbol} onSelect={setSelectedSymbol} formatPrice={formatPrice} />
+        <TickerStrip quotes={quotes} selectedSymbol={selectedSymbol} onSelect={setSelectedSymbol} formatPrice={formatPrice} dataSource={dataSource} />
       </header>
 
       {/* MAIN CONTENT */}
@@ -278,7 +523,18 @@ export default function TradingTerminal() {
             </div>
             <TabsContent value="trades" className="flex-1 m-0 overflow-y-auto"><TradesTab trades={trades} openTrades={openTrades} formatPrice={formatPrice} formatPnL={formatPnL} pnlColor={pnlColor} tradeStats={tradeStats} onNewTrade={() => setTradeDialogOpen(true)} /></TabsContent>
             <TabsContent value="agent" className="flex-1 m-0"><AgentTab agentState={agentState} openTrades={openTrades} maxConcurrent={maxConcurrent} isScanning={isScanning} onAgentToggle={handleAgentToggle} onUpdateAgent={updateAgent} onScan={runScan} /></TabsContent>
-            <TabsContent value="mt5" className="flex-1 m-0 overflow-y-auto"><MT5Tab connected={mt5Connected} orders={mt5Orders} /></TabsContent>
+            <TabsContent value="mt5" className="flex-1 m-0 overflow-y-auto">
+              <MT5Tab
+                connected={mt5Connected}
+                account={mt5Account}
+                positions={mt5Positions}
+                onConnect={handleMT5Connect}
+                onDisconnect={handleMT5Disconnect}
+                onClosePosition={handleMT5ClosePosition}
+                onCloseAll={handleMT5CloseAll}
+                onRefresh={fetchMT5Data}
+              />
+            </TabsContent>
             <TabsContent value="news" className="flex-1 m-0 overflow-y-auto"><NewsTab news={news} loading={newsLoading} onRefresh={fetchNews} /></TabsContent>
             <TabsContent value="stats" className="flex-1 m-0 overflow-y-auto"><StatsTab stats={perfStats} loading={perfLoading} onRefresh={fetchPerformance} /></TabsContent>
             <TabsContent value="log" className="flex-1 m-0 overflow-y-auto"><ScanLog log={scanLog} /></TabsContent>

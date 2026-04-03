@@ -131,6 +131,39 @@ export interface PerformanceStats {
   strategyBreakdown: { strategy: string; trades: number; winRate: number; pnl: number }[];
 }
 
+// ==================== MT5 TYPES ====================
+
+export interface MT5Account {
+  balance: number;
+  equity: number;
+  margin: number;
+  freeMargin: number;
+  marginLevel: number;
+  leverage: number;
+  currency: string;
+  profit: number;
+}
+
+export interface MT5Position {
+  ticket: number;
+  symbol: string;
+  type: number; // 0=BUY, 1=SELL
+  lots: number;
+  price_open: number;
+  price_current: number;
+  sl: number;
+  tp: number;
+  profit: number;
+  swap: number;
+  comment: string;
+  time_open: number;
+  time_update: number;
+}
+
+export type DataSource = 'MT5' | 'Yahoo' | null;
+
+// ==================== CONSTANTS ====================
+
 export const SYMBOLS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'XAU/USD', 'BTC/USD'];
 
 export const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'];

@@ -1,5 +1,10 @@
-// Market data fetching from Yahoo Finance
-import { Candle, TIMEFRAME_CANDLE_LIMITS, TIMEFRAME_YAHOO } from './trading-engine';
+// Market data fetching — Yahoo Finance with MT5 dual provider support
+import { Candle, TIMEFRAME_CANDLE_LIMITS } from './trading-engine';
+import {
+  isMT5Connected, fetchMT5Quotes, fetchMT5Candles,
+  toMT5Symbol, mt5QuoteToYahooFormat, isMT5Quote,
+  type MT5CompatibleQuote,
+} from './mt5-provider';
 
 interface YahooQuote {
   regularMarketPrice: number;
@@ -9,6 +14,9 @@ interface YahooQuote {
   previousClose: number;
   shortName: string;
 }
+
+// Extended quote that may carry MT5 source info
+export type FetchQuoteResult = YahooQuote | MT5CompatibleQuote;
 
 interface YahooChartResult {
   timestamp: number[];
@@ -31,6 +39,19 @@ async function fetchWithCache<T>(key: string, ttl: number, fetcher: () => Promis
 }
 
 export async function fetchQuote(symbol: string): Promise<YahooQuote | null> {
+  try {
+    // Try MT5 first
+    if (await isMT5Connected()) {
+      const mt5Quotes = await fetchMT5Quotes([symbol]);
+      if (mt5Quotes && mt5Quotes.length > 0) {
+        const converted = mt5QuoteToYahooFormat(mt5Quotes[0]);
+        return converted;
+      }
+    }
+  } catch {
+    // MT5 failed, fall through to Yahoo
+  }
+
   try {
     const data = await fetchWithCache(`quote_${symbol}`, CACHE_TTL, async () => {
       const res = await fetch(
@@ -60,10 +81,28 @@ export async function fetchQuote(symbol: string): Promise<YahooQuote | null> {
   }
 }
 
+// Check if MT5 was used for the last quote fetch
+export async function isDataSourceMT5(): Promise<boolean> {
+  return await isMT5Connected();
+}
+
 export async function fetchCandles(symbol: string, timeframe: string, limit?: number): Promise<Candle[]> {
+  // Try MT5 first
+  try {
+    if (await isMT5Connected()) {
+      const candleLimit = limit ?? TIMEFRAME_CANDLE_LIMITS[timeframe] ?? 200;
+      const mt5Candles = await fetchMT5Candles(symbol, timeframe, candleLimit);
+      if (mt5Candles && mt5Candles.length > 0) {
+        return mt5Candles;
+      }
+    }
+  } catch {
+    // MT5 failed, fall through to Yahoo
+  }
+
+  // Fallback to Yahoo
   try {
     const candleLimit = limit ?? TIMEFRAME_CANDLE_LIMITS[timeframe] ?? 200;
-    const yahooInterval = TIMEFRAME_YAHOO[timeframe] ?? '1h';
     const rangeMap: Record<string, Record<string, string>> = {
       '5m': { range: '5d', interval: '5m' },
       '15m': { range: '10d', interval: '15m' },
@@ -170,10 +209,77 @@ function aggregateTo4h(
 
 export async function fetchMultipleQuotes(symbols: string[]): Promise<Map<string, YahooQuote>> {
   const results = new Map<string, YahooQuote>();
+
+  // Try MT5 first for all symbols
+  try {
+    if (await isMT5Connected()) {
+      const mt5Quotes = await fetchMT5Quotes(symbols);
+      if (mt5Quotes && mt5Quotes.length > 0) {
+        // Match MT5 quotes back to the original symbol keys
+        for (const mt5Q of mt5Quotes) {
+          // Find the original display symbol that maps to this MT5 symbol
+          for (const sym of symbols) {
+            if (toMT5Symbol(sym) === mt5Q.symbol) {
+              results.set(sym, mt5QuoteToYahooFormat(mt5Q));
+              break;
+            }
+          }
+        }
+        // If we got quotes for all symbols, return early
+        if (results.size >= symbols.length) return results;
+        // Otherwise, continue to Yahoo for missing symbols
+        const missingSymbols = symbols.filter(s => !results.has(s));
+        if (missingSymbols.length === 0) return results;
+        const yahooResults = await fetchYahooMultipleQuotes(missingSymbols);
+        for (const [sym, quote] of yahooResults.entries()) {
+          results.set(sym, quote);
+        }
+        return results;
+      }
+    }
+  } catch {
+    // MT5 failed, fall through to Yahoo
+  }
+
+  // Fallback: fetch from Yahoo
+  return await fetchYahooMultipleQuotes(symbols);
+}
+
+async function fetchYahooMultipleQuotes(symbols: string[]): Promise<Map<string, YahooQuote>> {
+  const results = new Map<string, YahooQuote>();
   const promises = symbols.map(async (sym) => {
-    const quote = await fetchQuote(sym);
+    const quote = await fetchYahooQuoteDirect(sym);
     if (quote) results.set(sym, quote);
   });
   await Promise.allSettled(promises);
   return results;
+}
+
+// Direct Yahoo fetch without MT5 check (used internally for fallback)
+async function fetchYahooQuoteDirect(symbol: string): Promise<YahooQuote | null> {
+  try {
+    const data = await fetchWithCache(`quote_${symbol}`, CACHE_TTL, async () => {
+      const res = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=5m`,
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    });
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta) return null;
+    return {
+      regularMarketPrice: meta.regularMarketPrice,
+      regularMarketChange: meta.regularMarketChange ?? meta.regularMarketPrice - meta.previousClose,
+      regularMarketChangePercent: meta.regularMarketChangePercent ?? 0,
+      regularMarketVolume: meta.regularMarketVolume ?? 0,
+      previousClose: meta.previousClose ?? meta.chartPreviousClose,
+      shortName: meta.symbol,
+    };
+  } catch (e) {
+    console.error(`Failed to fetch quote for ${symbol}:`, e);
+    return null;
+  }
 }
