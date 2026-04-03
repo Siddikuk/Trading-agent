@@ -432,7 +432,7 @@ export default function TradingTerminal() {
                     >
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-2">
-                          <CircleDot className={`w-3 h-3 ${t.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'} fill="currentColor" />
+                          <CircleDot className={`w-3 h-3 ${t.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`} fill="currentColor" />
                           <span className="font-bold text-sm">{t.symbol}</span>
                           <Badge variant="outline" className={cn(
                             'text-[10px]',
@@ -633,7 +633,7 @@ export default function TradingTerminal() {
                         <div key={i} className={`rounded-lg p-2 bg-muted/30 ${o.status === 'OPEN' ? 'border-l-2 border-primary' : 'opacity-50'}`}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <CircleDot className={`w-2.5 h-2.5 ${o.type === 'BUY' ? 'text-emerald-400' : 'text-red-400'} fill="currentColor" />
+                              <CircleDot className={`w-2.5 h-2.5 ${o.type === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`} fill="currentColor" />
                               <span className="text-sm font-bold">{o.symbol as string}</span>
                               <Badge variant="outline" className={`text-[10px] ${o.type === 'BUY' ? 'border-emerald-400/30 text-emerald-400' : 'border-red-400/30 text-red-400'}`}>
                                 {o.type as string} {o.lots as number}
