@@ -15,14 +15,16 @@ export async function GET(req: Request) {
       return NextResponse.json({ symbol: single, yahooSymbol: sym, ...quote });
     }
 
-    const symbols = symbolsParam
-      ? symbolsParam.split(',').map(s => yahooSymbol(s.trim()))
-      : DEFAULT_SYMBOLS.map(s => yahooSymbol(s));
+    // Keep the original display names (e.g. "EUR/USD") alongside Yahoo symbols (e.g. "EURUSD=X")
+    const displaySymbols = symbolsParam
+      ? symbolsParam.split(',').map(s => s.trim())
+      : [...DEFAULT_SYMBOLS];
 
-    const quotes = await fetchMultipleQuotes(symbols);
-    const results = Array.from(quotes.entries()).map(([sym, q]) => ({
+    const yahooSymbols = displaySymbols.map(s => yahooSymbol(s));
+    const quotes = await fetchMultipleQuotes(yahooSymbols);
+    const results = Array.from(quotes.entries()).map(([sym, q], i) => ({
       symbol: sym,
-      displaySymbol: sym,
+      displaySymbol: displaySymbols[i] || sym,
       price: q.regularMarketPrice,
       change: q.regularMarketChange,
       changePercent: q.regularMarketChangePercent,
