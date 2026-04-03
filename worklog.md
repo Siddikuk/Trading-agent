@@ -77,3 +77,67 @@ Stage Summary:
 - Fix 2: Switched from dev mode to production build (208MB vs 1.1GB)
 - Production server running stably, all APIs returning 200
 - Trade-off: Code changes require rebuild (`npx next build` + restart) vs hot reload
+
+---
+Task ID: 8
+Agent: main
+Task: Push previous fixes to GitHub + fix chart not displaying
+
+Work Log:
+- Analyzed git state: 8 unpushed commits with mixed changes
+- Removed problematic files: page.tsx.bak, keepalive.sh
+- Added db/*.db to .gitignore (exclude local SQLite database)
+- Removed db/custom.db from git tracking
+- Squashed 8 messy commits into 1 clean commit
+- Fixed chart: /api/forex/signals was not returning candle data
+  - Added chartCandles (last 150 candles) to signals API response
+- Full verification: lint clean, build OK, all APIs 200, candles confirmed (150 items)
+- Pushed to GitHub: 3961a60
+
+Stage Summary:
+- Clean git history with 1 commit covering all changes
+- Chart now displays candlestick data
+- Database files excluded from version control
+- Commit: 3961a60 feat: trading dashboard overhaul
+
+---
+Task ID: 9
+Agent: main
+Task: Rebuild AI agent brain from mechanical EA to LLM reasoning engine
+
+Work Log:
+- Analyzed existing code: scan/route.ts already used ai-agent.ts (partially LLM)
+- ai-agent.ts existed but had basic prompt and single-source news
+- trading-engine.ts had mechanical formulas used by /api/forex/signals (chart panel)
+
+Enhanced ai-agent.ts (complete rewrite):
+- Multi-source news: symbol-specific + macro + central bank (parallel fetch)
+- Symbol-aware queries (EUR→ECB, GBP→BoE, JPY→BoJ, USD→Fed, XAU/BTC→specific)
+- 5-step analysis framework prompt (Trend→Momentum→Price Action→News→Synthesis)
+- Price action engine: candlestick patterns (Doji, Hammer, Engulfing), momentum, S/R
+- Rich indicator annotations (oversold/overbought warnings, EMA alignment analysis)
+- Proper ATR-based SL/TP validation with min 1.5:1 R:R enforcement
+- Min 50% confidence gate (raised from 40%)
+- 60s LLM timeout protection
+- 5min news cache to reduce API calls
+- Detailed logging: elapsed time, news count, decision summary
+
+Updated signals/route.ts:
+- Added ?ai=true query parameter for AI analysis on demand
+- Default: fast mechanical analysis (instant chart display)
+- AI mode: full LLM reasoning with detailed response
+- Returns aiAnalysis object with reasoning, sentiment, R:R, lot size
+
+Verification:
+- Lint: 0 errors
+- Build: successful
+- AI test: EUR/USD analyzed with 8 news articles, HOLD decision with reasoning
+- Mechanical test: instant response with 150 candles and 4 strategies
+- Pushed to GitHub: e2236f7
+
+Stage Summary:
+- AI agent now uses LLM for all trade decisions (not mechanical formulas)
+- Multi-source news provides fundamental context
+- 5-step analysis framework ensures structured reasoning
+- Chart panel remains fast (mechanical), AI available on demand
+- Commit: e2236f7
