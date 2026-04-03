@@ -518,19 +518,21 @@ export default function TradingTerminal() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <audio ref={audioRef} className="hidden" />
 
-      {/* ============ SETTINGS SHEET (Mobile) ============ */}
-      <Sheet open={showSettings} onOpenChange={setShowSettings}>
-        <SheetContent side="right" className="w-80">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              <Settings className="w-4 h-4" />
-              Agent Settings
-            </SheetTitle>
-            <SheetDescription>Configure trading strategies and parameters</SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-4">{settingsContent}</div>
-        </SheetContent>
-      </Sheet>
+      {/* ============ SETTINGS SHEET (Mobile only) ============ */}
+      <div className="lg:hidden">
+        <Sheet open={showSettings} onOpenChange={setShowSettings}>
+          <SheetContent side="right" className="w-80">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
+                <Settings className="w-4 h-4" />
+                Agent Settings
+              </SheetTitle>
+              <SheetDescription>Configure trading strategies and parameters</SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-4">{settingsContent}</div>
+          </SheetContent>
+        </Sheet>
+      </div>
 
       {/* ============ NEW TRADE DIALOG ============ */}
       <Dialog open={tradeDialogOpen} onOpenChange={setTradeDialogOpen}>
