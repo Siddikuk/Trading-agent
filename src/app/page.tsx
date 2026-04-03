@@ -236,13 +236,30 @@ export default function TradingTerminal() {
           const r = result as Record<string, unknown>;
           if (r.action === 'TRADE_OPENED') {
             const ts2 = new Date().toLocaleTimeString();
-            setScanLog(prev => [...prev, '[' + ts2 + '] OPENED ' + r.direction + ' ' + sym + ' @ ' + r.entryPrice + ' (' + r.confidence + '%)']);
+            setScanLog(prev => [...prev, '[' + ts2 + '] AI OPENED ' + r.direction + ' ' + sym + ' @ ' + r.entryPrice + ' (' + r.confidence + '%)']);
+            if (r.reasoning) {
+              const reasonStr = String(r.reasoning).slice(0, 200);
+              setScanLog(prev => [...prev, '  Reasoning: ' + reasonStr + (reasonStr.length >= 200 ? '...' : '')]);
+            }
+            if (r.sentimentScore !== undefined) {
+              const sent = Number(r.sentimentScore);
+              setScanLog(prev => [...prev, '  Sentiment: ' + (sent > 20 ? 'BULLISH' : sent < -20 ? 'BEARISH' : 'NEUTRAL') + ' (' + sent + ')']);
+            }
             toast({
-              title: 'Trade Opened',
-              description: r.direction + ' ' + sym + ' @ ' + r.entryPrice,
+              title: 'AI Trade Opened',
+              description: r.direction + ' ' + sym + ' @ ' + r.entryPrice + ' — ' + r.confidence + '% confidence',
             });
-          } else if (r.signal === true) {
+          } else if (r.action === 'SIGNAL_ONLY') {
             signalsFound++;
+            const ts5 = new Date().toLocaleTimeString();
+            setScanLog(prev => [...prev, '[' + ts5 + '] AI SIGNAL: ' + r.direction + ' ' + sym + ' (' + r.confidence + '%) — auto-trade off']);
+          } else if (r.action === 'HOLD') {
+            const ts6 = new Date().toLocaleTimeString();
+            setScanLog(prev => [...prev, '[' + ts6 + '] ' + sym + ': HOLD — ' + (r.skipReason || 'No opportunity')]);
+            if (r.sentimentScore !== undefined) {
+              const sent2 = Number(r.sentimentScore);
+              setScanLog(prev => [...prev, '  Sentiment: ' + (sent2 > 20 ? 'BULLISH' : sent2 < -20 ? 'BEARISH' : 'NEUTRAL') + ' (' + sent2 + ')']);
+            }
           } else if (r.skipped) {
             const ts3 = new Date().toLocaleTimeString();
             setScanLog(prev => [...prev, '[' + ts3 + '] ' + sym + ': ' + r.skipped]);
@@ -442,9 +459,9 @@ export default function TradingTerminal() {
   const handleAgentToggle = (key: 'isRunning' | 'autoTrade', value: boolean) => {
     updateAgent({ [key]: value });
     if (key === 'isRunning') {
-      toast({ title: value ? 'Agent Started' : 'Agent Stopped', description: value ? 'Scanning markets autonomously' : 'Agent paused' });
+      toast({ title: value ? 'AI Agent Started' : 'AI Agent Stopped', description: value ? 'AI analyzing markets with news + technicals' : 'Agent paused' });
     } else {
-      toast({ title: value ? 'Auto-Trade Enabled' : 'Auto-Trade Disabled', description: value ? 'Executing signals automatically' : 'Manual mode active' });
+      toast({ title: value ? 'Auto-Trade Enabled' : 'Auto-Trade Disabled', description: value ? 'AI will execute trades automatically' : 'AI signals only — no auto execution' });
     }
   };
 
@@ -811,7 +828,8 @@ export default function TradingTerminal() {
           <div className="border-t border-border px-3 py-3 bg-card/30">
             <div className="flex items-center gap-2 mb-3">
               <Brain className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold">Signal Analysis {'\u2014'} {selectedSymbol} {timeframe}</span>
+              <span className="text-sm font-semibold">AI Signal Analysis {'\u2014'} {selectedSymbol} {timeframe}</span>
+              <Badge variant="outline" className="text-[10px] border-primary/30 text-primary ml-auto">AI Powered</Badge>
             </div>
 
             {combinedSignal && (
@@ -1269,7 +1287,7 @@ export default function TradingTerminal() {
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm font-semibold">Agent Status</div>
-                      <div className="text-xs text-muted-foreground">{agentState?.isRunning ? 'Scanning markets autonomously' : 'Agent is stopped'}</div>
+                      <div className="text-xs text-muted-foreground">{agentState?.isRunning ? 'AI analyzing news, sentiment & technicals' : 'AI agent is stopped'}</div>
                     </div>
                     <Button
                       variant={agentState?.isRunning ? 'destructive' : 'default'}
@@ -1287,7 +1305,7 @@ export default function TradingTerminal() {
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm font-semibold">Auto-Trade</div>
-                      <div className="text-xs text-muted-foreground">{agentState?.autoTrade ? 'Executing signals automatically' : 'Manual mode \u2014 signals only'}</div>
+                      <div className="text-xs text-muted-foreground">{agentState?.autoTrade ? 'AI executes trades automatically' : 'Signals only — no auto execution'}</div>
                     </div>
                     <Switch
                       checked={agentState?.autoTrade || false}
@@ -1383,7 +1401,7 @@ export default function TradingTerminal() {
                 ) : (
                   <>
                     <Zap className="w-4 h-4" />
-                    Manual Scan
+                    AI Scan
                   </>
                 )}
               </Button>

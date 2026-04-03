@@ -1,45 +1,57 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { fetchCandles, fetchQuote } from '@/lib/market-data';
-import { yahooSymbol, getAllIndicators, analyzeSymbol, combineSignals, calcPositionSize, calcRiskReward } from '@/lib/trading-engine';
+import { analyzeWithAI, type AIDecision } from '@/lib/ai-agent';
+import { yahooSymbol } from '@/lib/trading-engine';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { symbols, timeframe } = body;
-    const symList = symbols || ['EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD', 'BTC/USD'];
+    const symList: string[] = symbols || ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'XAU/USD', 'BTC/USD'];
     const tf = timeframe || '1h';
 
     // Get agent state
     let agentState = await db.agentState.findUnique({ where: { id: 'main' } });
-    if (!agentState || !agentState.isRunning || !agentState.autoTrade) {
-      return NextResponse.json({ error: 'Agent not running or auto-trade disabled', scanned: 0, trades: 0 });
+    if (!agentState || !agentState.isRunning) {
+      return NextResponse.json({
+        error: 'Agent not running',
+        scanned: 0,
+        trades: 0,
+        results: Object.fromEntries(symList.map(s => [s, { skipped: 'Agent not running' }])),
+      });
     }
 
-    // Get recent trades for risk check
+    // Risk checks
     const recentTrades = await db.trade.findMany({
       where: { status: 'CLOSED', closeTime: { gte: new Date(Date.now() - 86400000) } },
     });
     const dailyPnL = recentTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-    const dailyLimit = agentState.dailyRiskLimit;
-    const maxLoss = agentState.balance * (dailyLimit / 100);
+    const maxLoss = agentState.balance * (agentState.dailyRiskLimit / 100);
     if (dailyPnL <= -maxLoss) {
-      return NextResponse.json({ error: 'Daily risk limit reached — stopping', dailyPnL, maxLoss, scanned: 0, trades: 0 });
+      return NextResponse.json({
+        error: 'Daily risk limit reached — agent paused',
+        dailyPnL: Math.round(dailyPnL * 100) / 100,
+        maxLoss: Math.round(maxLoss * 100) / 100,
+        scanned: 0, trades: 0,
+        results: Object.fromEntries(symList.map(s => [s, { skipped: 'Daily risk limit reached' }])),
+      });
     }
 
-    // Check for too many open positions
     const openCount = await db.trade.count({ where: { status: 'OPEN' } });
-    if (openCount >= 5) {
-      return NextResponse.json({ error: 'Max 5 open positions', openCount, scanned: 0, trades: 0 });
+    const maxPositions = 5;
+    if (openCount >= maxPositions) {
+      return NextResponse.json({
+        error: `Max ${maxPositions} open positions reached`,
+        openCount, scanned: 0, trades: 0,
+        results: Object.fromEntries(symList.map(s => [s, { skipped: 'Max positions reached' }])),
+      });
     }
 
     let newTrades = 0;
-    const results: Record<string, unknown> = {};
+    const results: Record<string, Record<string, unknown>> = {};
 
     for (const displaySym of symList) {
       try {
-        const sym = yahooSymbol(displaySym);
-
         // Skip if already have open position on this symbol
         const existingOpen = await db.trade.findFirst({ where: { symbol: displaySym, status: 'OPEN' } });
         if (existingOpen) {
@@ -47,84 +59,96 @@ export async function POST(req: Request) {
           continue;
         }
 
-        const candles = await fetchCandles(sym, tf);
-        if (candles.length < 30) {
-          results[displaySym] = { skipped: 'Insufficient data' };
-          continue;
-        }
-
-        const indicators = getAllIndicators(candles);
-        const price = candles[candles.length - 1].close;
-        const signalResults = analyzeSymbol(displaySym, candles, tf);
-        const combined = combineSignals(signalResults);
-
-        if (!combined || combined.confidence < 60) {
-          results[displaySym] = { skipped: `Low confidence: ${combined?.confidence || 0}%` };
-          continue;
-        }
-
-        // Calculate position size
-        const lotSize = calcPositionSize(
+        // AI ANALYSIS — this is the brain
+        const decision: AIDecision = await analyzeWithAI(
+          displaySym,
+          tf,
           agentState.balance,
           agentState.maxRiskPercent,
-          combined.entryPrice,
-          combined.stopLoss,
+          true // enable news
         );
 
-        // Auto-execute trade
+        if (!decision.shouldTrade) {
+          results[displaySym] = {
+            action: 'HOLD',
+            direction: decision.direction,
+            confidence: decision.confidence,
+            reasoning: decision.reasoning,
+            sentimentScore: decision.sentimentScore,
+            skipReason: decision.skipReason,
+          };
+          continue;
+        }
+
+        // Auto-execute trade (only if autoTrade is enabled)
+        if (!agentState.autoTrade) {
+          results[displaySym] = {
+            action: 'SIGNAL_ONLY',
+            direction: decision.direction,
+            confidence: decision.confidence,
+            entryPrice: decision.entryPrice,
+            stopLoss: decision.stopLoss,
+            takeProfit: decision.takeProfit,
+            lotSize: decision.lotSize,
+            riskReward: decision.riskRewardRatio,
+            reasoning: decision.reasoning,
+            sentimentScore: decision.sentimentScore,
+          };
+          continue;
+        }
+
+        // Execute the trade
         const trade = await db.trade.create({
           data: {
             symbol: displaySym,
-            direction: combined.direction,
-            lotSize,
-            entryPrice: combined.entryPrice,
-            stopLoss: combined.stopLoss,
-            takeProfit: combined.takeProfit,
-            strategy: combined.strategy,
+            direction: decision.direction,
+            lotSize: decision.lotSize,
+            entryPrice: decision.entryPrice,
+            stopLoss: decision.stopLoss,
+            takeProfit: decision.takeProfit,
+            strategy: 'AI-Agent',
             status: 'OPEN',
             openTime: new Date(),
+            notes: `AI reasoning: ${decision.reasoning.slice(0, 500)}`,
           },
         });
 
-        // Save signal
+        // Save signal record
         await db.signal.create({
           data: {
             symbol: displaySym,
-            direction: combined.direction,
-            confidence: combined.confidence,
-            entryPrice: combined.entryPrice,
-            stopLoss: combined.stopLoss,
-            takeProfit: combined.takeProfit,
-            strategy: combined.strategy,
+            direction: decision.direction,
+            confidence: decision.confidence,
+            entryPrice: decision.entryPrice,
+            stopLoss: decision.stopLoss,
+            takeProfit: decision.takeProfit,
+            strategy: 'AI-Agent',
             timeframe: tf,
-            indicators: JSON.stringify(indicators),
+            indicators: JSON.stringify({ sentimentScore: decision.sentimentScore, riskReward: decision.riskRewardRatio }),
             executed: true,
             tradeId: trade.id,
             expiresAt: new Date(Date.now() + 3600000),
           },
         });
 
-        const rr = calcRiskReward(combined.entryPrice, combined.stopLoss, combined.takeProfit);
-
         results[displaySym] = {
           action: 'TRADE_OPENED',
           tradeId: trade.id,
-          direction: combined.direction,
-          confidence: combined.confidence,
-          entryPrice: combined.entryPrice,
-          stopLoss: combined.stopLoss,
-          takeProfit: combined.takeProfit,
-          lotSize,
-          riskReward: rr,
-          reason: combined.reason,
+          direction: decision.direction,
+          confidence: decision.confidence,
+          entryPrice: decision.entryPrice,
+          stopLoss: decision.stopLoss,
+          takeProfit: decision.takeProfit,
+          lotSize: decision.lotSize,
+          riskReward: decision.riskRewardRatio,
+          reasoning: decision.reasoning,
+          sentimentScore: decision.sentimentScore,
         };
         newTrades++;
       } catch (e) {
+        console.error(`[Scan] Error for ${displaySym}:`, e);
         results[displaySym] = { error: String(e) };
       }
-
-      // Rate limit: small delay between symbols
-      await new Promise(r => setTimeout(r, 500));
     }
 
     // Update agent last scan
@@ -134,7 +158,7 @@ export async function POST(req: Request) {
       success: true,
       scanned: symList.length,
       newTrades,
-      dailyPnL,
+      dailyPnL: Math.round(dailyPnL * 100) / 100,
       results,
       scannedAt: new Date().toISOString(),
     });
