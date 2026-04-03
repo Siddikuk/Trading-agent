@@ -28,7 +28,7 @@ import NewsTab from '@/components/trading/NewsTab';
 import StatsTab from '@/components/trading/StatsTab';
 import ScanLog from '@/components/trading/ScanLog';
 import Footer from '@/components/trading/Footer';
-import type { Quote, Trade, AgentState, SignalResult, NewsItem, PriceAlert, PerformanceStats } from '@/components/trading/types';
+import type { Quote, Trade, AgentState, SignalResult, AIAnalysis, NewsItem, PriceAlert, PerformanceStats } from '@/components/trading/types';
 import { SYMBOLS, TIMEFRAMES } from '@/components/trading/types';
 
 // ==================== MAIN APP ====================
@@ -44,6 +44,9 @@ export default function TradingTerminal() {
   const [indicators, setIndicators] = useState<IndicatorData>({});
   const [signalResults, setSignalResults] = useState<SignalResult[]>([]);
   const [combinedSignal, setCombinedSignal] = useState<Record<string, unknown> | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [isAIAnalyzing, setIsAIAnalyzing] = useState(false);
+  const aiAbortRef = useRef<AbortController | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradeStats, setTradeStats] = useState<Record<string, unknown> | null>(null);
   const [mt5Connected, setMt5Connected] = useState(false);
@@ -87,8 +90,10 @@ export default function TradingTerminal() {
   const fetchPerformance = useCallback(async () => { setPerfLoading(true); try { const r = await fetch('/api/forex/performance'); const d = await r.json(); if (d) setPerfStats(d); } catch {} setPerfLoading(false); }, []);
   const fetchAlerts = useCallback(async () => { try { const r = await fetch('/api/forex/alerts'); const d = await r.json(); if (d.alerts) setAlerts(d.alerts); } catch {} }, []);
 
+  // Fast mechanical analysis (instant — for chart + indicators)
   const analyzeSymbol = useCallback(async () => {
     setIsAnalyzing(true);
+    setAiAnalysis(null);
     try {
       const r = await fetch('/api/forex/signals?symbol=' + selectedSymbol + '&timeframe=' + timeframe);
       const d = await r.json();
@@ -100,6 +105,32 @@ export default function TradingTerminal() {
     } catch {}
     setIsAnalyzing(false);
   }, [selectedSymbol, timeframe, soundEnabled]);
+
+  // Slow AI analysis (10-30s — LLM reasoning with news/sentiment)
+  const analyzeSymbolWithAI = useCallback(async (symbol: string, tf: string) => {
+    setIsAIAnalyzing(true);
+    setAiAnalysis(null);
+    // Abort previous AI call if still running
+    if (aiAbortRef.current) aiAbortRef.current.abort();
+    const ctrl = new AbortController();
+    aiAbortRef.current = ctrl;
+    try {
+      const r = await fetch('/api/forex/signals?symbol=' + symbol + '&timeframe=' + tf + '&ai=true', { signal: ctrl.signal });
+      const d = await r.json();
+      if (d.aiAnalysis) {
+        setAiAnalysis(d.aiAnalysis);
+        // Update combined signal with AI decision
+        if (d.combinedSignal) setCombinedSignal(d.combinedSignal);
+        // Play alert on strong AI signal
+        if (d.aiAnalysis.shouldTrade && d.aiAnalysis.confidence >= 70 && soundEnabled) {
+          playAlert('AI ' + d.aiAnalysis.direction + ' ' + symbol + ' ' + d.aiAnalysis.confidence + '% confidence');
+        }
+      }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') console.error('AI analysis failed:', e);
+    }
+    setIsAIAnalyzing(false);
+  }, [soundEnabled]);
 
   const runScan = useCallback(async () => {
     setIsScanning(true);
@@ -157,7 +188,9 @@ export default function TradingTerminal() {
 
   // ==================== EFFECTS ====================
   useEffect(() => { fetchQuotes(); fetchAgentState(); fetchTrades(); }, [fetchQuotes, fetchAgentState, fetchTrades]);
+  // On symbol/timeframe change: load chart instantly, then trigger AI analysis
   useEffect(() => { analyzeSymbol(); }, [selectedSymbol, timeframe, analyzeSymbol]);
+  useEffect(() => { analyzeSymbolWithAI(selectedSymbol, timeframe); }, [selectedSymbol, timeframe]);
   useEffect(() => { const i = setInterval(fetchQuotes, 30000); return () => clearInterval(i); }, [fetchQuotes]);
   useEffect(() => {
     if (agentState?.isRunning && agentState.autoTrade) { scanIntervalRef.current = setInterval(runScan, scanInterval * 1000); return () => { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); }; }
@@ -230,7 +263,7 @@ export default function TradingTerminal() {
 
           {/* Signal Analysis */}
           <div className="border-t border-border px-3 py-3 bg-card/30">
-            <SignalAnalysis selectedSymbol={selectedSymbol} timeframe={timeframe} signalResults={signalResults} combinedSignal={combinedSignal} formatPrice={formatPrice} />
+            <SignalAnalysis selectedSymbol={selectedSymbol} timeframe={timeframe} signalResults={signalResults} combinedSignal={combinedSignal} aiAnalysis={aiAnalysis} isAIAnalyzing={isAIAnalyzing} formatPrice={formatPrice} />
             <PriceAlerts alerts={alerts} open={alertsOpen} setOpen={setAlertsOpen} newAlert={{ symbol: newAlertSymbol, setSymbol: setNewAlertSymbol, condition: newAlertCondition, setCondition: setNewAlertCondition, price: newAlertPrice, setPrice: setNewAlertPrice, submitting: alertSubmitting, onSubmit: createAlert }} onDelete={deleteAlert} onNewTrade={() => setTradeDialogOpen(true)} />
           </div>
         </div>

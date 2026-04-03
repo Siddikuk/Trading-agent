@@ -47,6 +47,22 @@ export interface SignalResult {
   hasSignal: boolean;
 }
 
+export interface AIAnalysis {
+  direction: string;
+  confidence: number;
+  sentimentScore: number;
+  riskRewardRatio: number;
+  reasoning: string;
+  shouldTrade: boolean;
+  skipReason?: string;
+  newsUsed: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  lotSize: number;
+  analyzedAt: string;
+}
+
 export interface CandleData {
   time: number;
   open: number;
