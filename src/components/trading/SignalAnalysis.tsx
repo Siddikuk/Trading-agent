@@ -23,6 +23,11 @@ interface SignalAnalysisProps {
   formatPrice: (p: number) => string;
 }
 
+// Safe price formatter — handles undefined/null without crashing
+function safePrice(p: number | undefined | null): string {
+  return typeof p === 'number' && isFinite(p) ? p.toFixed(5) : '---';
+}
+
 function SentimentBar({ score }: { score: number }) {
   const pct = ((score + 100) / 200) * 100;
   const label = score > 30 ? 'Bullish' : score < -30 ? 'Bearish' : 'Neutral';
@@ -155,15 +160,15 @@ export default function SignalAnalysis({
               <div className="grid grid-cols-3 gap-3 text-xs font-mono mb-2">
                 <div>
                   <span className="text-muted-foreground">Entry</span>
-                  <div>{formatPrice(aiAnalysis.entryPrice)}</div>
+                  <div>{safePrice(aiAnalysis.entryPrice)}</div>
                 </div>
                 <div>
                   <span className="text-muted-foreground">SL</span>
-                  <div className="text-red-400">{formatPrice(aiAnalysis.stopLoss)}</div>
+                  <div className="text-red-400">{safePrice(aiAnalysis.stopLoss)}</div>
                 </div>
                 <div>
                   <span className="text-muted-foreground">TP</span>
-                  <div className="text-emerald-400">{formatPrice(aiAnalysis.takeProfit)}</div>
+                  <div className="text-emerald-400">{safePrice(aiAnalysis.takeProfit)}</div>
                 </div>
               </div>
             )}

@@ -95,6 +95,7 @@ export interface NewsItem {
   snippet: string;
   source: string;
   date: string;
+  reliability?: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
 export interface PriceAlert {

@@ -86,7 +86,7 @@ export default function TradingTerminal() {
   const fetchQuotes = useCallback(async () => { try { const r = await fetch('/api/forex/market'); const d = await r.json(); if (d.data) setQuotes(d.data); } catch {} }, []);
   const fetchAgentState = useCallback(async () => { try { const r = await fetch('/api/forex/agent'); const d = await r.json(); if (d.state) setAgentState(d.state); } catch {} }, []);
   const fetchTrades = useCallback(async () => { try { const r = await fetch('/api/forex/trades'); const d = await r.json(); if (d.trades) setTrades(d.trades); if (d.stats) setTradeStats(d.stats); } catch {} }, []);
-  const fetchNews = useCallback(async () => { setNewsLoading(true); try { const r = await fetch('/api/forex/news?q=forex'); const d = await r.json(); if (d.results) setNews(d.results); } catch {} setNewsLoading(false); }, []);
+  const fetchNews = useCallback(async () => { setNewsLoading(true); try { const r = await fetch('/api/forex/news'); const d = await r.json(); if (d.results) setNews(d.results); } catch {} setNewsLoading(false); }, []);
   const fetchPerformance = useCallback(async () => { setPerfLoading(true); try { const r = await fetch('/api/forex/performance'); const d = await r.json(); if (d) setPerfStats(d); } catch {} setPerfLoading(false); }, []);
   const fetchAlerts = useCallback(async () => { try { const r = await fetch('/api/forex/alerts'); const d = await r.json(); if (d.alerts) setAlerts(d.alerts); } catch {} }, []);
 
