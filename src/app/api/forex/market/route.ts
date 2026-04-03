@@ -22,9 +22,13 @@ export async function GET(req: Request) {
 
     const yahooSymbols = displaySymbols.map(s => yahooSymbol(s));
     const quotes = await fetchMultipleQuotes(yahooSymbols);
-    const results = Array.from(quotes.entries()).map(([sym, q], i) => ({
+
+    // Build reverse lookup: yahoo symbol -> display symbol (prevents index misalignment if a fetch fails)
+    const yahooToDisplay = new Map(yahooSymbols.map((ys, i) => [ys, displaySymbols[i]]));
+
+    const results = Array.from(quotes.entries()).map(([sym, q]) => ({
       symbol: sym,
-      displaySymbol: displaySymbols[i] || sym,
+      displaySymbol: yahooToDisplay.get(sym) || sym,
       price: q.regularMarketPrice,
       change: q.regularMarketChange,
       changePercent: q.regularMarketChangePercent,

@@ -292,6 +292,8 @@ async function fetchAllNews(symbol: string): Promise<NewsContext[]> {
 
   // Cache result
   NEWS_CACHE.set(cacheKey, { data: allNews, ts: Date.now() });
+  // Prevent memory leak: clear old cache entries if too many
+  if (NEWS_CACHE.size > 50) NEWS_CACHE.clear();
 
   return allNews.slice(0, 8); // Cap at 8 articles max
 }
@@ -440,8 +442,6 @@ function buildAnalysisPrompt(
 
   // EMA alignment analysis
   const emas = [indicators.ema9, indicators.ema21, indicators.ema50, indicators.ema200].filter((v): v is number => v !== undefined);
-  const emaBullish = emas.length >= 2 && emas.every((v, i) => i === 0 || v <= emas[i - 1]) === false;
-  const emaBearish = emas.length >= 2 && emas.every((v, i) => i === 0 || v >= emas[i - 1]) === false;
   let emaSummary = '';
   if (emas.length >= 3) {
     const sorted = [...emas].sort((a, b) => b - a);
@@ -501,9 +501,9 @@ NOTE: Prioritize 🔴 HIGH reliability sources (Reuters, Bloomberg, CNBC) for tr
 ### RISK PARAMETERS
 - Account Balance: $${balance.toFixed(2)}
 - Max Risk Per Trade: ${riskPercent}% ($${(balance * riskPercent / 100).toFixed(2)})
-- ATR-based SL suggestion: ${atr.toFixed(5)} (1.5x ATR = ${(atr * 1.5).toFixed(5)})
-- ATR-based TP suggestion: ${(atr * 2.5).toFixed(5)} (2.5x ATR)
-- Minimum required R:R: 1.5:1
+- ATR-based SL suggestion: ${atr.toFixed(5)} (1.2x ATR = ${(atr * 1.2).toFixed(5)})
+- ATR-based TP suggestion: ${(atr * 3.5).toFixed(5)} (3.5x ATR)
+- Minimum required R:R: 2.0:1
 
 Analyze ${symbol} using the framework above. Respond with JSON only.`;
 }
@@ -549,8 +549,12 @@ async function queryAI(
         // Only retry on rate limit (429) — fail fast on everything else
         if (msg.includes('429') || msg.includes('Too many requests')) {
           const waitTime = (attempt + 1) * 8000; // 8s, 16s, 24s backoff
-          console.warn(`[AI Agent] Rate limited (attempt ${attempt + 1}/3), retrying in ${waitTime / 1000}s...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          if (attempt < 2) { // Skip wait on last attempt — no point waiting if we won't retry
+            console.warn(`[AI Agent] Rate limited (attempt ${attempt + 1}/3), retrying in ${waitTime / 1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          } else {
+            console.warn(`[AI Agent] Rate limited (attempt 3/3), giving up`);
+          }
         } else {
           break; // Not a rate limit error — don't retry
         }

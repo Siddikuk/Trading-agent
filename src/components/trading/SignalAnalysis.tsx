@@ -293,9 +293,9 @@ export default function SignalAnalysis({
             <Badge variant="secondary">{String(combinedSignal.strategy)}</Badge>
           </div>
           <div className="grid grid-cols-3 gap-3 text-xs font-mono">
-            <div><span className="text-muted-foreground">Entry</span><br />{formatPrice(combinedSignal.entryPrice as number)}</div>
-            <div><span className="text-muted-foreground">SL</span><br /><span className="text-red-400">{formatPrice(combinedSignal.stopLoss as number)}</span></div>
-            <div><span className="text-muted-foreground">TP</span><br /><span className="text-emerald-400">{formatPrice(combinedSignal.takeProfit as number)}</span></div>
+            <div><span className="text-muted-foreground">Entry</span><br />{safePrice(combinedSignal.entryPrice as number)}</div>
+            <div><span className="text-muted-foreground">SL</span><br /><span className="text-red-400">{safePrice(combinedSignal.stopLoss as number)}</span></div>
+            <div><span className="text-muted-foreground">TP</span><br /><span className="text-emerald-400">{safePrice(combinedSignal.takeProfit as number)}</span></div>
           </div>
           {combinedSignal.reason && (
             <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{String(combinedSignal.reason)}</p>

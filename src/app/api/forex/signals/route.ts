@@ -89,7 +89,7 @@ export async function GET(req: Request) {
           shouldTrade: decision.shouldTrade,
           skipReason: decision.skipReason,
           newsUsed: decision.newsUsed,
-          newsSources: (decision as Record<string, unknown>).newsSources as string[] || [],
+          newsSources: decision.newsSources,
           entryPrice: decision.entryPrice,
           stopLoss: decision.stopLoss,
           takeProfit: decision.takeProfit,
