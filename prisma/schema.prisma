@@ -3,23 +3,23 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model Trade {
   id          String   @id @default(cuid())
   symbol      String
-  direction   String   // BUY or SELL
+  direction   String
   lotSize     Float
   entryPrice  Float
   stopLoss    Float?
   takeProfit  Float?
   exitPrice   Float?
   pnl         Float?
-  status      String   @default("OPEN") // OPEN, CLOSED, CANCELLED
+  status      String   @default("OPEN")
   signalId    String?
-  strategy    String?  // Which strategy generated this
+  strategy    String?
   openTime    DateTime @default(now())
   closeTime   DateTime?
   notes       String?
@@ -28,14 +28,14 @@ model Trade {
 model Signal {
   id          String   @id @default(cuid())
   symbol      String
-  direction   String   // BUY or SELL
-  confidence  Float    // 0-100
+  direction   String
+  confidence  Float
   entryPrice  Float
   stopLoss    Float
   takeProfit  Float
-  strategy    String   // Which strategy: RSI, MACD, Bollinger, etc.
+  strategy    String
   timeframe   String
-  indicators  String   // JSON string of indicator values
+  indicators  String
   executed    Boolean  @default(false)
   tradeId     String?
   createdAt   DateTime @default(now())
@@ -51,7 +51,7 @@ model AgentState {
   maxRiskPercent  Float   @default(2)
   maxDrawdownPercent Float @default(10)
   dailyRiskLimit  Float   @default(5)
-  strategies      String  @default("RSI,MACD,Bollinger") // comma-separated
+  strategies      String  @default("RSI,MACD,Bollinger")
   watchSymbols    String  @default("EURUSD=X,GBPUSD=X,USDJPY=X,XAUUSD=X,BTCUSD=X")
   timeframe       String  @default("1h")
   mt5Connected    Boolean @default(false)
@@ -63,7 +63,7 @@ model AgentState {
 model PriceAlert {
   id        String   @id @default(cuid())
   symbol    String
-  condition String   // ABOVE, BELOW, CROSSES_ABOVE, CROSSES_BELOW
+  condition String
   price     Float
   isActive  Boolean  @default(true)
   triggered Boolean  @default(false)
@@ -74,7 +74,7 @@ model PriceAlert {
 model WatchlistGroup {
   id        String @id @default(cuid())
   name      String @unique
-  symbols   String // comma-separated
+  symbols   String
   isBuiltIn Boolean @default(false)
   createdAt DateTime @default(now())
 }
