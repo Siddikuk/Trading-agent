@@ -72,7 +72,7 @@ export default function TradingTerminal() {
   const [mt5Account, setMt5Account] = useState<MT5Account | null>(null);
   const [mt5Positions, setMt5Positions] = useState<MT5Position[]>([]);
   const [dataSource, setDataSource] = useState<DataSource>(null);
-  const mt5SocketRef = useRef<unknown>(null);
+  const mt5ConnectingRef = useRef(false);
 
   // News / perf / alerts state
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -90,127 +90,38 @@ export default function TradingTerminal() {
   const [tradeSubmitting, setTradeSubmitting] = useState(false);
 
   // ==================== MT5 BRIDGE CONNECTION ====================
-  const connectMT5Socket = useCallback((url: string) => {
-    // Disconnect existing socket
-    if (mt5SocketRef.current) {
-      try { (mt5SocketRef.current as { disconnect: () => void }).disconnect(); } catch {}
-      mt5SocketRef.current = null;
-    }
+  // All MT5 communication goes through server-side API proxy (no direct WebSocket from browser)
+  // This avoids HTTPS → ws:// mixed content security errors
 
+  const testMT5Connection = useCallback(async (url: string): Promise<boolean> => {
     try {
-      // Dynamic import of socket.io-client (it's a peer dep, install if needed)
-      // Using native WebSocket fallback for the relay connection
-      const socketUrl = url.replace(/^http/, 'ws');
-      const ws = new WebSocket(socketUrl);
-
-      ws.onopen = () => {
-        console.log('[MT5] WebSocket connected to relay');
-        setMt5Connected(true);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          // Handle socket.io packet format
-          if (data.type === 0 && data.data && Array.isArray(data.data) && data.data.length >= 2) {
-            const eventName = data.data[0] as string;
-            const eventData = data.data[1] as Record<string, unknown>;
-
-            switch (eventName) {
-              case 'mt5_status':
-                setMt5Connected(eventData.connected === true);
-                break;
-              case 'quotes_update':
-                // Refresh quotes when live data arrives
-                if (eventData.quotes) {
-                  fetchQuotes();
-                }
-                break;
-              case 'positions_update':
-                if (eventData.positions) {
-                  setMt5Positions(eventData.positions as MT5Position[]);
-                }
-                break;
-              case 'account_update':
-                if (eventData.balance !== undefined) {
-                  setMt5Account(eventData as unknown as MT5Account);
-                }
-                break;
-              case 'order_result':
-                if (eventData.success) {
-                  toast({ title: 'Order Executed', description: `Ticket #${eventData.ticket}` });
-                  fetchMT5Data();
-                } else {
-                  toast({ title: 'Order Failed', description: eventData.error, variant: 'destructive' });
-                }
-                break;
-              case 'close_result':
-                if (eventData.success) {
-                  toast({ title: 'Position Closed', description: `Profit: $${(eventData.profit ?? 0).toFixed(2)}` });
-                  fetchMT5Data();
-                } else {
-                  toast({ title: 'Close Failed', description: eventData.error, variant: 'destructive' });
-                }
-                break;
-            }
-          }
-        } catch {}
-      };
-
-      ws.onclose = () => {
-        console.log('[MT5] WebSocket disconnected from relay');
-        setMt5Connected(false);
-      };
-
-      ws.onerror = () => {
-        console.error('[MT5] WebSocket error');
-        setMt5Connected(false);
-      };
-
-      mt5SocketRef.current = ws;
-    } catch (e) {
-      console.error('[MT5] Failed to connect:', e);
-      setMt5Connected(false);
+      // Save URL to server-side config first
+      await fetch('/api/forex/mt5/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      // Then test the connection via server-side proxy
+      const r = await fetch('/api/forex/mt5/config');
+      const d = await r.json();
+      return d.connected === true;
+    } catch {
+      return false;
     }
-  }, [toast]);
-
-  const disconnectMT5Socket = useCallback(() => {
-    if (mt5SocketRef.current) {
-      try { (mt5SocketRef.current as { disconnect: () => void }).disconnect(); } catch {}
-      mt5SocketRef.current = null;
-    }
-    setMt5Connected(false);
-    setMt5Account(null);
-    setMt5Positions([]);
   }, []);
 
-  const sendMT5SocketEvent = useCallback((eventName: string, data?: unknown) => {
-    const ws = mt5SocketRef.current as WebSocket | null;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // socket.io-engine packet format: type 2 = EVENT
-    ws.send(JSON.stringify({ type: 2, data: data ? [eventName, data] : [eventName], nsp: '/' }));
-  }, []);
-
-  // Initialize MT5 from localStorage
+  // Initialize MT5 from localStorage and auto-test on mount
   useEffect(() => {
     const savedUrl = localStorage.getItem('mt5_bridge_url');
     if (savedUrl) {
       setMt5BridgeUrl(savedUrl);
+      // Auto-test connection via server proxy
+      testMT5Connection(savedUrl).then(ok => setMt5Connected(ok));
     }
-  }, []);
-
-  // Connect MT5 when URL is set and tab is viewed
-  useEffect(() => {
-    if (mt5BridgeUrl && activeTab === 'mt5') {
-      connectMT5Socket(mt5BridgeUrl);
-    }
-    return () => {
-      // Don't disconnect on tab switch, keep alive
-    };
-  }, [mt5BridgeUrl, activeTab, connectMT5Socket]);
+  }, [testMT5Connection]);
 
   const fetchMT5Data = useCallback(async () => {
-    if (!mt5Connected) return;
+    if (!mt5BridgeUrl) return;
     try {
       const [accRes, posRes] = await Promise.allSettled([
         fetch('/api/forex/mt5/account'),
@@ -218,14 +129,17 @@ export default function TradingTerminal() {
       ]);
       if (accRes.status === 'fulfilled' && accRes.value.ok) {
         const accData = await accRes.value.json();
-        if (accData.balance !== undefined) setMt5Account(accData);
+        if (accData.balance !== undefined) {
+          setMt5Account(accData);
+          setMt5Connected(true);
+        }
       }
       if (posRes.status === 'fulfilled' && posRes.value.ok) {
         const posData = await posRes.value.json();
         if (posData.positions) setMt5Positions(posData.positions);
       }
     } catch {}
-  }, [mt5Connected]);
+  }, [mt5BridgeUrl]);
 
   // Auto-refresh MT5 data every 5s when connected
   useEffect(() => {
@@ -348,48 +262,55 @@ export default function TradingTerminal() {
     // Save to localStorage
     localStorage.setItem('mt5_bridge_url', url);
     setMt5BridgeUrl(url);
+    mt5ConnectingRef.current = true;
+    toast({ title: 'MT5 Bridge', description: 'Testing connection...' });
 
-    // Save to server config
-    try {
-      await fetch('/api/forex/mt5/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-    } catch {}
-
-    // Connect
-    connectMT5Socket(url);
-    toast({ title: 'MT5 Bridge', description: 'Configuring bridge connection...' });
-  }, [connectMT5Socket, toast]);
+    // Test connection via server-side proxy
+    const ok = await testMT5Connection(url);
+    mt5ConnectingRef.current = false;
+    if (ok) {
+      setMt5Connected(true);
+      toast({ title: 'MT5 Bridge', description: 'Connected! Live data flowing.' });
+      fetchMT5Data(); // Fetch account + positions immediately
+      fetchQuotes();   // Refresh quotes with MT5 data
+    } else {
+      setMt5Connected(false);
+      toast({ title: 'MT5 Bridge', description: 'Connection failed. Check your VPS bridge.', variant: 'destructive' });
+    }
+  }, [testMT5Connection, fetchMT5Data, fetchQuotes, toast]);
 
   const handleTestBridge = useCallback(async () => {
-    try {
-      const r = await fetch('/api/forex/mt5/config');
-      const d = await r.json();
-      if (d.connected) {
-        toast({ title: 'MT5 Bridge', description: 'Connection successful!' });
-        setMt5Connected(true);
-      } else {
-        toast({ title: 'MT5 Bridge', description: 'Connection failed', variant: 'destructive' });
-        setMt5Connected(false);
-      }
-    } catch {
-      toast({ title: 'MT5 Bridge', description: 'Could not reach bridge', variant: 'destructive' });
+    toast({ title: 'MT5 Bridge', description: 'Testing...' });
+    const ok = await testMT5Connection(mt5BridgeUrl || '');
+    if (ok) {
+      setMt5Connected(true);
+      toast({ title: 'MT5 Bridge', description: 'Connection successful!' });
+    } else {
       setMt5Connected(false);
+      toast({ title: 'MT5 Bridge', description: 'Connection failed', variant: 'destructive' });
     }
-  }, [toast]);
+  }, [testMT5Connection, mt5BridgeUrl, toast]);
 
   const handleMT5Connect = useCallback((url: string) => {
     handleSetBridgeUrl(url);
   }, [handleSetBridgeUrl]);
 
-  const handleMT5Disconnect = useCallback(() => {
-    disconnectMT5Socket();
+  const handleMT5Disconnect = useCallback(async () => {
+    // Clear server-side config
+    try {
+      await fetch('/api/forex/mt5/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: null }),
+      });
+    } catch {}
     localStorage.removeItem('mt5_bridge_url');
     setMt5BridgeUrl(null);
+    setMt5Connected(false);
+    setMt5Account(null);
+    setMt5Positions([]);
     toast({ title: 'MT5 Bridge', description: 'Disconnected' });
-  }, [disconnectMT5Socket, toast]);
+  }, [toast]);
 
   const handleMT5ClosePosition = useCallback(async (ticket: number) => {
     try {
