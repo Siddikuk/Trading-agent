@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 // ==================== NEWS FILTERING ====================
-// Same quality standards as the AI agent — no YouTube, no tutorials, no ads.
+// Quality standards for trading-relevant news.
 // Only real market-moving news from credible financial sources.
 
 // Blacklisted domains — broker ads, tutorials, social media, video sites
@@ -14,6 +14,8 @@ const JUNK_DOMAINS = new Set([
   'webull.com', 'etoro.com', 'plus500.com', 'avatrade.com',
   'pepperstone.com', 'icmarkets.com', 'exness.com', 'xm.com',
   'forex.com', 'babypips.com', 'dailyfx.com', 'forexfactory.com',
+  'tripadvisor.com', 'amazon.com', 'ebay.com', 'booking.com',
+  'pinterest.com', 'craigslist.org', 'yelp.com', 'zillow.com',
 ]);
 
 // Title keywords that indicate junk content
@@ -37,6 +39,7 @@ const JUNK_KEYWORDS = [
   'setup explained', 'thanks for watching', 'subscribe',
   'like and subscribe', 'deepening my understanding',
   'video:', 'watch:', 'episode', 'podcast:',
+  'pinterest', 'tripadvisor', 'amazon', 'booking.com',
 ];
 
 // Tier 1 news sources — highest trust (wire services + major financial outlets)
@@ -47,28 +50,62 @@ const TIER1 = new Set([
   'theguardian.com', 'imf.org', 'cmegroup.com', 'cnn.com',
 ]);
 
+// Tier 2 — solid financial news
+const TIER2 = new Set([
+  'finance.yahoo.com', 'money.cnn.com', 'barrons.com',
+  'seekingalpha.com', 'coindesk.com', 'cointelegraph.com',
+  'kitco.com', 'nasdaq.com', 'investopedia.com',
+  'financial-times.com', 'nytimes.com', 'washingtonpost.com',
+  'aljazeera.com', 'sky.com', 'nbcnews.com', 'abcnews.go.com',
+]);
+
 function isJunk(title: string, snippet: string): boolean {
   const combined = `${title} ${snippet}`.toLowerCase();
   return JUNK_KEYWORDS.some(k => combined.includes(k));
 }
 
+function isJunkDomain(host: string): boolean {
+  if (!host) return true;
+  const h = host.toLowerCase();
+  for (const junk of JUNK_DOMAINS) {
+    if (h.includes(junk)) return true;
+  }
+  return false;
+}
+
 function scoreSource(host: string): number {
   if (!host) return 0;
   const h = host.toLowerCase();
+
   // Instant reject junk domains
-  for (const junk of JUNK_DOMAINS) {
-    if (h.includes(junk)) return 0;
-  }
+  if (isJunkDomain(h)) return 0;
+
   // Tier 1 = highest trust
   for (const t1 of TIER1) {
     if (h.includes(t1)) return 90;
   }
-  // Moderate financial news keywords
-  const goodKeywords = ['news', 'finance', 'market', 'investing', 'stock', 'commodit', 'tradingeconomics'];
-  if (goodKeywords.some(k => h.includes(k))) return 50;
-  // Unknown — only accept if it looks like a real news site
-  if (h.includes('.com') || h.includes('.co.uk') || h.includes('.org')) return 20;
-  return 0;
+
+  // Tier 2 = solid financial news
+  for (const t2 of TIER2) {
+    if (h.includes(t2)) return 75;
+  }
+
+  // Moderate financial news keywords in domain
+  const strongKeywords = ['news', 'finance', 'market', 'investing', 'stock', 'commodit', 'tradingeconomics', 'capital', 'trader', 'fx', 'forex'];
+  if (strongKeywords.some(k => h.includes(k))) return 45;
+
+  // Any .com, .co.uk, .org, .net, .io — give moderate score
+  // so we don't filter out legitimate smaller news sites
+  if (h.endsWith('.com') || h.endsWith('.co.uk') || h.endsWith('.org') || h.endsWith('.net') || h.endsWith('.io')) {
+    return 25;
+  }
+
+  // Country-code TLDs that often have legitimate news (.de, .fr, .jp, etc.)
+  if (/\.([a-z]{2})$/.test(h)) {
+    return 20;
+  }
+
+  return 10;
 }
 
 // ==================== QUERY BUILDER ====================
@@ -81,12 +118,12 @@ function buildMarketNewsQueries(): string[] {
 
   return [
     // Macro/geopolitical — the stuff that ACTUALLY moves currencies
-    `forex currency market breaking news ${dateStr} central bank economic data`,
-    `geopolitical news sanctions war trade tariff impact on currency ${dateStr}`,
+    `forex currency market breaking news today central bank economic data`,
+    `geopolitical news sanctions war trade tariff impact currency today`,
     // Central bank focus
-    `Federal Reserve ECB Bank of Japan interest rate monetary policy decision ${dateStr}`,
+    `Federal Reserve ECB Bank of Japan interest rate monetary policy decision today`,
     // Economic data
-    `US dollar euro yen pound inflation GDP jobs economic data release today ${dateStr}`,
+    `US dollar euro yen pound inflation GDP jobs economic data release today`,
   ];
 }
 
@@ -104,13 +141,13 @@ export async function GET(req: Request) {
       ? [userQuery, ...buildMarketNewsQueries().slice(0, 1)]
       : buildMarketNewsQueries();
 
-    // Fetch from multiple queries in parallel
+    // Fetch from multiple queries in parallel — use recency_days: 7 for broader results
     const allResults = await Promise.allSettled(
       queries.map(async (q) => {
         const results = await zai.functions.invoke('web_search', {
           query: q,
-          num: 10,
-          recency_days: 1,
+          num: 15,
+          recency_days: 7,
         });
         return results || [];
       }),
@@ -128,11 +165,14 @@ export async function GET(req: Request) {
       score: scoreSource(String(r.host_name || '')),
     }));
 
-    // Apply quality filters
+    console.log(`[News API] Raw results: ${raw.length}, from ${allResults.filter(r => r.status === 'fulfilled').length}/${allResults.length} queries`);
+
+    // Apply quality filters — more lenient than before
     const filtered = raw
       .filter(item => {
         if (item.score <= 0) return false;
-        if (item.title.length < 15) return false;
+        if (item.title.length < 10) return false; // Relaxed from 15
+        if (item.url.length < 10) return false;    // Must have a valid URL
         if (isJunk(item.title, item.snippet)) return false;
         return true;
       })
@@ -147,7 +187,12 @@ export async function GET(req: Request) {
       return true;
     });
 
-    const final = deduped.slice(0, 10);
+    const final = deduped.slice(0, 15);
+
+    console.log(`[News API] Filtered: ${filtered.length}, Deduped: ${deduped.length}, Final: ${final.length}`);
+    if (final.length === 0 && raw.length > 0) {
+      console.log(`[News API] All ${raw.length} results were filtered. Sample rejected titles:`, raw.slice(0, 3).map(r => `${r.title} (score:${r.score})`));
+    }
 
     return NextResponse.json({
       query: queries.join(' | '),
@@ -164,6 +209,7 @@ export async function GET(req: Request) {
       fetchedAt: new Date().toISOString(),
     });
   } catch (error) {
+    console.error('[News API] Error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

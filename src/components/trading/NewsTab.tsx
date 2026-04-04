@@ -117,8 +117,10 @@ export default function NewsTab({ news, loading, onRefresh }: NewsTabProps) {
           ))}
         </div>
       ) : (
-        <div className="text-center text-xs text-muted-foreground py-8">
-          No quality news found. Click refresh to try again.
+        <div className="text-center text-xs text-muted-foreground py-8 space-y-2">
+          <Newspaper className="w-8 h-8 mx-auto text-muted-foreground/40" />
+          <p>No quality news found.</p>
+          <p className="text-[10px]">This may be due to heavy filtering or search API limits. Click refresh to try again.</p>
         </div>
       )}
     </div>
