@@ -255,13 +255,13 @@ export async function fetchMT5Candles(
   }));
 }
 
-export async function fetchMT5Account(): Promise<MT5Account | null> {
-  const data = await proxyToBridge<MT5Account>('/account');
+export async function fetchMT5Account(explicitUrl?: string | null): Promise<MT5Account | null> {
+  const data = await proxyToBridge<MT5Account>('/account', explicitUrl);
   return data;
 }
 
-export async function fetchMT5Positions(): Promise<MT5Position[] | null> {
-  const data = await proxyToBridge<{ positions: MT5Position[] }>('/positions');
+export async function fetchMT5Positions(explicitUrl?: string | null): Promise<MT5Position[] | null> {
+  const data = await proxyToBridge<{ positions: MT5Position[] }>('/positions', explicitUrl);
   return data?.positions ?? null;
 }
 
