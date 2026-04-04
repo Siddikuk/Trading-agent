@@ -112,7 +112,12 @@ export default function TradingTerminal() {
 
   // Initialize MT5 from localStorage and auto-test on mount
   useEffect(() => {
-    const savedUrl = localStorage.getItem('mt5_bridge_url');
+    let savedUrl = localStorage.getItem('mt5_bridge_url');
+    // Migration: if old direct IP URL, clear it — user needs to re-enter tunnel URL
+    if (savedUrl && (savedUrl.includes('51.68.205.91') || savedUrl.includes(':8080'))) {
+      localStorage.removeItem('mt5_bridge_url');
+      savedUrl = null;
+    }
     if (savedUrl) {
       setMt5BridgeUrl(savedUrl);
       // Auto-test connection via server proxy — also save to server
