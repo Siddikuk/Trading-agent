@@ -242,6 +242,55 @@ function buildNewsQueries(symbol: string): string[] {
   return queries;
 }
 
+// RSS feeds for news — works on any server (no z-ai-web-dev-sdk needed)
+const RSS_FEEDS_AI = [
+  'https://feeds.reuters.com/reuters/businessNews',
+  'https://feeds.bbc.co.uk/news/business/rss.xml',
+  'https://feeds.feedburner.com/Marketwatch/stockmarketnews',
+  'https://www.forexlive.com/feed',
+  'https://www.investing.com/rss/news.rss',
+];
+
+async function fetchRSSNews(): Promise<NewsContext[]> {
+  const RSS2JSON = 'https://api.rss2json.com/v1/api.json';
+  const allNews: NewsContext[] = [];
+
+  try {
+    const results = await Promise.allSettled(
+      RSS_FEEDS_AI.slice(0, 3).map(async (feedUrl) => {
+        const res = await fetch(`${RSS2JSON}?rss_url=${encodeURIComponent(feedUrl)}&count=5`, {
+          next: { revalidate: 300 },
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        if (data.status !== 'ok' || !data.items) return [];
+        return data.items.map((item: Record<string, unknown>) => ({
+          title: String(item.title || '').trim(),
+          snippet: String(item.description || '').replace(/<[^>]*>/g, '').trim().slice(0, 200),
+          source: String(item.author || '').split('.')[0] || 'News',
+          date: String(item.pubDate || ''),
+          score: 70,
+        }));
+      }),
+    );
+
+    for (const r of results) {
+      if (r.status === 'fulfilled') allNews.push(...r.value);
+    }
+  } catch (error) {
+    console.error('[AI Agent] RSS news fetch failed:', error);
+  }
+
+  // Deduplicate
+  const seen = new Set<string>();
+  return allNews.filter(n => {
+    const key = n.title.toLowerCase().slice(0, 60);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return n.title.length > 15;
+  }).slice(0, 6);
+}
+
 async function fetchAllNews(symbol: string): Promise<NewsContext[]> {
   // Check cache
   const cacheKey = `news_${symbol}_${Math.floor(Date.now() / NEWS_CACHE_TTL)}`;
@@ -250,52 +299,34 @@ async function fetchAllNews(symbol: string): Promise<NewsContext[]> {
 
   let allNews: NewsContext[] = [];
 
-  try {
-    const zai = await ZAI.create();
-    const queries = buildNewsQueries(symbol);
+  // Try RSS feeds first (works everywhere)
+  allNews = await fetchRSSNews();
 
-    // Fetch first 2 queries in parallel (pair-specific — most important)
-    const [primaryNews, secondaryNews] = await Promise.allSettled([
-      fetchNewsFromWeb(zai, queries[0], 3),
-      queries.length > 1 ? fetchNewsFromWeb(zai, queries[1], 3) : Promise.resolve([] as NewsContext[]),
-    ]);
-
-    if (primaryNews.status === 'fulfilled') allNews = [...primaryNews.value];
-    if (secondaryNews.status === 'fulfilled') allNews = [...allNews, ...secondaryNews.value];
-
-    // Fetch central bank + macro queries (these find the REAL market-moving events)
-    if (queries.length > 2) {
-      const [cbResult, macroResult] = await Promise.allSettled([
-        fetchNewsFromWeb(zai, queries[2], 2),
-        queries.length > 3 ? fetchNewsFromWeb(zai, queries[3], 2) : Promise.resolve([] as NewsContext[]),
+  // If RSS returned results, use those
+  if (allNews.length > 0) {
+    console.log(`[AI Agent] RSS news for ${symbol}: ${allNews.length} articles`);
+  } else {
+    // Fallback: try z-ai-web-dev-sdk web search (only works in sandbox)
+    try {
+      const zai = await ZAI.create();
+      const queries = buildNewsQueries(symbol);
+      const [primaryNews, secondaryNews] = await Promise.allSettled([
+        fetchNewsFromWeb(zai, queries[0], 3),
+        queries.length > 1 ? fetchNewsFromWeb(zai, queries[1], 3) : Promise.resolve([] as NewsContext[]),
       ]);
-      if (cbResult.status === 'fulfilled') allNews = [...allNews, ...cbResult.value];
-      if (macroResult.status === 'fulfilled') allNews = [...allNews, ...macroResult.value];
+      if (primaryNews.status === 'fulfilled') allNews = [...primaryNews.value];
+      if (secondaryNews.status === 'fulfilled') allNews = [...allNews, ...secondaryNews.value];
+      console.log(`[AI Agent] Web search news for ${symbol}: ${allNews.length} articles`);
+    } catch (error) {
+      console.error('[AI Agent] Web search unavailable (expected on Vercel), using RSS only');
     }
-
-    // Deduplicate by title similarity
-    const seen = new Set<string>();
-    allNews = allNews.filter(n => {
-      const key = n.title.toLowerCase().slice(0, 60);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    // Sort by source quality (best first)
-    allNews.sort((a, b) => b.score - a.score);
-
-    console.log(`[AI Agent] News for ${symbol}: ${allNews.length} articles, sources: [${allNews.map(n => n.source).join(', ')}]`);
-  } catch (error) {
-    console.error('[AI Agent] News aggregation failed:', error);
   }
 
   // Cache result
   NEWS_CACHE.set(cacheKey, { data: allNews, ts: Date.now() });
-  // Prevent memory leak: clear old cache entries if too many
   if (NEWS_CACHE.size > 50) NEWS_CACHE.clear();
 
-  return allNews.slice(0, 8); // Cap at 8 articles max
+  return allNews.slice(0, 8);
 }
 
 // ==================== PRICE ACTION ANALYSIS ====================

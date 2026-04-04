@@ -1,189 +1,168 @@
 import { NextResponse } from 'next/server';
 
-// ==================== NEWS FILTERING ====================
-const JUNK_DOMAINS = new Set([
-  'youtube.com', 'youtu.be', 'wikipedia.org', 'wikihow.com',
-  'reddit.com', 'quora.com', 'pinterest.com', 'facebook.com',
-  'twitter.com', 'x.com', 'instagram.com', 'tiktok.com',
-  'linkedin.com', 'medium.com', '.edu', 'academia.edu',
-  'study.com', 'tastyfx.com', 'tastytrade.com', 'robinhood.com',
-  'webull.com', 'etoro.com', 'plus500.com', 'avatrade.com',
-  'pepperstone.com', 'icmarkets.com', 'exness.com', 'xm.com',
-  'forex.com', 'babypips.com', 'dailyfx.com', 'forexfactory.com',
-  'tripadvisor.com', 'amazon.com', 'ebay.com', 'booking.com',
-  'craigslist.org', 'yelp.com', 'zillow.com',
-]);
+// ==================== NEWS FEEDS ====================
+// Uses free RSS feeds from major financial news sources.
+// No z-ai-web-dev-sdk needed — works on any server including Vercel.
 
-const JUNK_KEYWORDS = [
-  'what is forex', 'what is trading', 'what is currency',
-  'how to trade', 'how to start', 'how to read',
-  'forex for beginners', 'forex 101', 'trading for beginners',
-  'learn forex', 'learn trading', 'forex basics', 'trading basics',
-  'forex tutorial', 'trading tutorial', 'forex course', 'trading course',
-  'start trading', 'open account', 'sign up', 'register now',
-  'best forex broker', 'top forex broker', 'broker review',
-  'zero commission', 'bonus', 'promotional',
-  'thanks for watching', 'subscribe', 'like and subscribe',
-  'video:', 'watch:', 'episode', 'podcast:',
-  'pinterest', 'tripadvisor', 'amazon', 'booking.com',
+interface NewsItem {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;
+  date: string;
+  reliability: string;
+}
+
+// High-quality financial news RSS feeds
+const RSS_FEEDS = [
+  { url: 'https://feeds.reuters.com/reuters/businessNews', source: 'Reuters', reliability: 'HIGH' },
+  { url: 'https://feeds.bbc.co.uk/news/business/rss.xml', source: 'BBC News', reliability: 'HIGH' },
+  { url: 'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml', source: 'NY Times', reliability: 'HIGH' },
+  { url: 'https://feeds.feedburner.com/Marketwatch/stockmarketnews', source: 'MarketWatch', reliability: 'HIGH' },
+  { url: 'https://www.cnbc.com/id/100003114/device/rss/rss.html', source: 'CNBC', reliability: 'HIGH' },
+  { url: 'https://www.forexlive.com/feed', source: 'ForexLive', reliability: 'HIGH' },
+  { url: 'https://www.investing.com/rss/news.rss', source: 'Investing.com', reliability: 'HIGH' },
+  { url: 'https://feeds.finance.yahoo.com/rss/2.0/headline?s=EURUSD=X&region=US&lang=en-US', source: 'Yahoo Finance', reliability: 'MEDIUM' },
 ];
 
-const TIER1 = new Set([
-  'reuters.com', 'bloomberg.com', 'cnbc.com', 'wsj.com', 'ft.com',
-  'marketwatch.com', 'investing.com', 'forexlive.com', 'fxstreet.com',
-  'tradingeconomics.com', 'economist.com', 'apnews.com', 'bbc.com',
-  'theguardian.com', 'imf.org', 'cmegroup.com', 'cnn.com',
-]);
+// Free RSS-to-JSON proxy (no API key needed)
+const RSS2JSON_API = 'https://api.rss2json.com/v1/api.json';
 
-function isJunk(title: string, snippet: string): boolean {
+async function fetchRSSFeed(feedUrl: string, source: string, reliability: string): Promise<NewsItem[]> {
+  try {
+    const url = `${RSS2JSON_API}?rss_url=${encodeURIComponent(feedUrl)}&count=10`;
+    const res = await fetch(url, {
+      next: { revalidate: 300 }, // Cache for 5 minutes
+      headers: { 'User-Agent': 'TradingAgent/1.0' },
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    if (data.status !== 'ok' || !data.items) return [];
+
+    return data.items.map((item: Record<string, unknown>) => ({
+      title: String(item.title || '').trim(),
+      url: String(item.link || ''),
+      snippet: String(item.description || '')
+        .replace(/<[^>]*>/g, '') // Strip HTML tags
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .trim()
+        .slice(0, 300),
+      source,
+      date: item.pubDate ? new Date(String(item.pubDate)).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      }) : '',
+      reliability,
+    })).filter((item: NewsItem) => item.title.length > 10 && item.url.length > 10);
+  } catch (err) {
+    console.error(`[News] Feed error (${source}):`, String(err));
+    return [];
+  }
+}
+
+// Filter out irrelevant news for forex/currency traders
+function isRelevant(title: string, snippet: string): boolean {
   const combined = `${title} ${snippet}`.toLowerCase();
-  return JUNK_KEYWORDS.some(k => combined.includes(k));
-}
 
-function scoreSource(host: string): number {
-  if (!host) return 0;
-  const h = host.toLowerCase();
-  for (const junk of JUNK_DOMAINS) { if (h.includes(junk)) return 0; }
-  for (const t1 of TIER1) { if (h.includes(t1)) return 90; }
-  if (/news|finance|market|investing|stock|capital|trader/.test(h)) return 50;
-  if (/\.com|\.org|\.net|\.io/.test(h)) return 30;
-  return 15;
-}
-
-function buildMarketNewsQueries(): string[] {
-  return [
-    `forex currency market breaking news today`,
-    `Federal Reserve ECB interest rate decision today`,
-    `US dollar euro yen inflation GDP economic data today`,
-    `geopolitics sanctions trade war currency impact today`,
+  // Definitely relevant keywords
+  const relevantKeywords = [
+    'forex', 'currency', 'currenc', 'dollar', 'euro', 'yen', 'pound', 'sterling',
+    'federal reserve', 'fed ', 'ecb', 'bank of japan', 'boj', 'bank of england', 'boe',
+    'interest rate', 'rates', 'inflation', 'gdp', 'central bank', 'monetary policy',
+    'tariff', 'trade war', 'sanctions', 'geopolitic', 'market', 'stock', 'bond',
+    'gold', 'oil', 'commodit', 'bitcoin', 'crypto', 'economy', 'economic',
+    'usd', 'eur', 'gbp', 'jpy', 'aud', 'cad', 'chf', 'nzd',
+    'treasury', 'fomc', 'employment', 'jobs report', 'cpi', 'ppi',
+    'exchange rate', 'foreign exchange',
   ];
+
+  // Definitely irrelevant keywords
+  const irrelevantKeywords = [
+    'celebrity', 'entertainment', 'sports', 'football', 'soccer', 'basketball',
+    'recipe', 'travel', 'hotel', 'restaurant', 'movie', 'film', 'tv show',
+    'pinterest', 'tripadvisor', 'amazon prime', 'netflix', 'spotify',
+    'what to watch', 'best movies', 'deals of the day', 'coupon',
+  ];
+
+  // Reject irrelevant content first
+  if (irrelevantKeywords.some(k => combined.includes(k))) return false;
+
+  // Accept if any relevant keyword matches
+  return relevantKeywords.some(k => combined.includes(k));
 }
 
 // ==================== ENDPOINT ====================
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const userQuery = searchParams.get('q');
-  const debug = searchParams.get('debug') === '1';
-
+export async function GET() {
   try {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
+    // Fetch top 4 feeds in parallel (enough for good coverage, not too slow)
+    const [reuters, bbc, marketwatch, forexlive] = await Promise.all([
+      fetchRSSFeed(RSS_FEEDS[0].url, RSS_FEEDS[0].source, RSS_FEEDS[0].reliability),
+      fetchRSSFeed(RSS_FEEDS[1].url, RSS_FEEDS[1].source, RSS_FEEDS[1].reliability),
+      fetchRSSFeed(RSS_FEEDS[3].url, RSS_FEEDS[3].source, RSS_FEEDS[3].reliability),
+      fetchRSSFeed(RSS_FEEDS[5].url, RSS_FEEDS[5].source, RSS_FEEDS[5].reliability),
+    ]);
 
-    const queries = (userQuery && userQuery.length > 3)
-      ? [userQuery, ...buildMarketNewsQueries().slice(0, 1)]
-      : buildMarketNewsQueries();
+    // Also try CNBC and Investing.com in background (don't block on them)
+    const [cnbc, investing] = await Promise.all([
+      fetchRSSFeed(RSS_FEEDS[4].url, RSS_FEEDS[4].source, RSS_FEEDS[4].reliability),
+      fetchRSSFeed(RSS_FEEDS[6].url, RSS_FEEDS[6].source, RSS_FEEDS[6].reliability),
+    ]);
 
-    // Fetch all queries in parallel
-    const settled = await Promise.allSettled(
-      queries.map(async (q, idx) => {
-        try {
-          const results = await zai.functions.invoke('web_search', {
-            query: q,
-            num: 10,
-            recency_days: 7,
-          });
-          return { idx, query: q, results: results || [], status: 'ok' };
-        } catch (err) {
-          return { idx, query: q, results: [], status: 'error', error: String(err) };
-        }
-      }),
-    );
+    const allNews = [...reuters, ...bbc, ...marketwatch, ...forexlive, ...cnbc, ...investing];
 
-    // Debug: show query-level results
-    const queryDiagnostics = settled.map(s => {
-      if (s.status === 'fulfilled') {
-        const d = s.value;
-        return { query: d.query, status: d.status, count: d.results.length, error: d.error || undefined };
-      }
-      return { query: 'unknown', status: 'rejected', error: String(s.reason) };
+    console.log(`[News API] Fetched: Reuters(${reuters.length}) BBC(${bbc.length}) MW(${marketwatch.length}) FL(${forexlive.length}) CNBC(${cnbc.length}) Inv(${investing.length})`);
+
+    // Sort by date (newest first)
+    allNews.sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      return db - da;
     });
 
-    // Flatten all results
-    const raw = settled.flatMap(s => {
-      if (s.status !== 'fulfilled') return [];
-      return s.value.results.map((r: Record<string, unknown>) => ({
-        title: String(r.name || r.title || ''),
-        url: String(r.url || ''),
-        snippet: String(r.snippet || r.description || ''),
-        source: String(r.host_name || r.domain || ''),
-        date: String(r.date || ''),
-        score: scoreSource(String(r.host_name || r.domain || '')),
-        // Keep raw keys for debugging
-        _rawKeys: Object.keys(r),
-      }));
-    });
-
-    // If debug mode, return raw data before filtering
-    if (debug) {
-      return NextResponse.json({
-        debug: true,
-        queries: queryDiagnostics,
-        totalRaw: raw.length,
-        rawSample: raw.slice(0, 5).map(r => ({
-          title: r.title,
-          source: r.source,
-          url: r.url,
-          score: r.score,
-          snippet: r.snippet?.slice(0, 100),
-          rawKeys: r._rawKeys,
-        })),
-        filterWouldPass: raw.length,
-      });
-    }
-
-    // Filter: only reject score=0 (junk domains) and actual junk titles
-    const filtered = raw
-      .filter(item => {
-        if (item.score <= 0) return false;
-        if (item.title.length < 8) return false;
-        if (item.url.length < 10) return false;
-        if (isJunk(item.title, item.snippet)) return false;
-        return true;
-      })
-      .sort((a, b) => b.score - a.score);
-
-    // Deduplicate
+    // Deduplicate by title similarity
     const seen = new Set<string>();
-    const deduped = filtered.filter(item => {
+    const deduped = allNews.filter(item => {
       const key = item.title.toLowerCase().slice(0, 50);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
 
-    const final = deduped.slice(0, 15);
+    // Apply relevance filter — but keep some general market news too
+    const relevant = deduped.filter(item => isRelevant(item.title, item.snippet));
+    const general = deduped.filter(item => !isRelevant(item.title, item.snippet)).slice(0, 5);
 
-    // If still empty, include diagnostic info in the response
+    // Mix: all relevant first, then some general market news
+    const final = [...relevant, ...general].slice(0, 20);
+
+    console.log(`[News API] Total: ${allNews.length}, Deduped: ${deduped.length}, Relevant: ${relevant.length}, Final: ${final.length}`);
+
     return NextResponse.json({
-      results: final.map(({ title, url, snippet, source, date, score }) => ({
-        title,
-        url,
-        snippet,
-        source: source.replace('www.', '').split('.')[0],
-        date,
-        reliability: score >= 90 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW',
-      })),
+      results: final,
       fetchedAt: new Date().toISOString(),
-      // Include diagnostics so the frontend can show useful info
       _debug: {
-        totalRaw: raw.length,
-        totalFiltered: filtered.length,
-        queries: queryDiagnostics,
-        ...(final.length === 0 && raw.length > 0 ? {
-          rejectedSample: raw.slice(0, 3).map(r => ({
-            title: r.title,
-            source: r.source,
-            score: r.score,
-            reason: r.score <= 0 ? 'junk domain' : r.title.length < 8 ? 'short title' : isJunk(r.title, r.snippet) ? 'junk keyword' : 'unknown',
-          })),
-        } : {}),
+        totalRaw: allNews.length,
+        totalFiltered: final.length,
+        feeds: {
+          reuters: reuters.length,
+          bbc: bbc.length,
+          marketwatch: marketwatch.length,
+          forexlive: forexlive.length,
+          cnbc: cnbc.length,
+          investing: investing.length,
+        },
       },
     });
   } catch (error) {
+    console.error('[News API] Error:', error);
     return NextResponse.json({
       error: String(error),
       results: [],
-      _debug: { errorPhase: 'init', error: String(error) },
+      _debug: { errorPhase: 'fetch', error: String(error) },
     }, { status: 500 });
   }
 }
