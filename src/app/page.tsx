@@ -4,15 +4,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot, Activity, TrendingUp, TrendingDown, Minus,
-  RefreshCw, ChevronDown, ChevronUp, Shield, Zap,
-  Clock, DollarSign, BarChart2, AlertCircle, CheckCircle2,
-  Circle, Wifi, WifiOff, ArrowUpRight, ArrowDownRight,
+  RefreshCw, Shield, Zap, Clock, DollarSign, BarChart2,
+  AlertCircle, CheckCircle2, Circle, Wifi, WifiOff,
+  ArrowUpRight, ArrowDownRight, Newspaper, ExternalLink,
+  ChevronDown, ChevronUp, Filter,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AgentState {
-  id: string;
   isRunning: boolean;
   autoTrade: boolean;
   balance: number;
@@ -21,7 +21,6 @@ interface AgentState {
   watchSymbols: string;
   lastScanAt: string | null;
   mt5Connected: boolean;
-  updatedAt: string;
 }
 
 interface Signal {
@@ -32,7 +31,6 @@ interface Signal {
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
-  strategy: string;
   timeframe: string;
   indicators: string;
   executed: boolean;
@@ -46,13 +44,10 @@ interface Trade {
   lotSize: number;
   entryPrice: number;
   exitPrice: number | null;
-  stopLoss: number | null;
-  takeProfit: number | null;
   pnl: number | null;
   status: string;
   openTime: string;
   closeTime: string | null;
-  strategy: string | null;
 }
 
 interface AuditLog {
@@ -63,6 +58,15 @@ interface AuditLog {
   createdAt: string;
 }
 
+interface NewsItem {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;
+  date: string;
+  reliability: string;
+}
+
 interface ParsedIndicators {
   reasoning?: string;
   skip_reason?: string;
@@ -71,8 +75,6 @@ interface ParsedIndicators {
   riskReward?: number;
   riskRewardRatio?: number;
   confluence?: string;
-  sentiment_score?: number;
-  sentimentScore?: number;
   [key: string]: unknown;
 }
 
@@ -87,8 +89,9 @@ function timeAgo(dateStr: string): string {
 }
 
 function formatPrice(price: number, symbol: string): string {
-  const decimals = symbol.includes('JPY') ? 3 : symbol.includes('XAU') ? 2 : 5;
-  return price.toFixed(decimals);
+  if (symbol.includes('JPY')) return price.toFixed(3);
+  if (symbol.includes('XAU') || symbol.includes('BTC')) return price.toFixed(2);
+  return price.toFixed(5);
 }
 
 function parseIndicators(raw: string): ParsedIndicators {
@@ -106,40 +109,85 @@ function pnlColor(pnl: number | null): string {
   return pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
 }
 
-function confidenceBar(conf: number): string {
+function confidenceColor(conf: number): string {
   if (conf >= 70) return 'bg-emerald-500';
   if (conf >= 50) return 'bg-amber-500';
   return 'bg-slate-500';
 }
 
+function reliabilityColor(r: string) {
+  if (r === 'HIGH') return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
+  return 'text-amber-400 border-amber-500/30 bg-amber-500/10';
+}
+
 function actionIcon(action: string) {
-  if (action.includes('TRADE') || action.includes('ORDER')) return <ArrowUpRight size={12} className="text-emerald-400 shrink-0" />;
-  if (action.includes('CLOSE')) return <ArrowDownRight size={12} className="text-rose-400 shrink-0" />;
-  if (action.includes('HALT') || action.includes('ERROR') || action.includes('FAIL')) return <AlertCircle size={12} className="text-rose-400 shrink-0" />;
-  if (action.includes('SCAN') || action.includes('CYCLE')) return <RefreshCw size={12} className="text-sky-400 shrink-0" />;
-  if (action.includes('CLAUDE') || action.includes('DECISION')) return <Bot size={12} className="text-violet-400 shrink-0" />;
-  if (action.includes('SIGNAL')) return <Zap size={12} className="text-amber-400 shrink-0" />;
-  return <Circle size={12} className="text-slate-600 shrink-0" />;
+  if (action.includes('TRADE') || action.includes('ORDER')) return <ArrowUpRight size={11} className="text-emerald-400 shrink-0" />;
+  if (action.includes('CLOSE')) return <ArrowDownRight size={11} className="text-rose-400 shrink-0" />;
+  if (action.includes('HALT') || action.includes('ERROR') || action.includes('FAIL')) return <AlertCircle size={11} className="text-rose-400 shrink-0" />;
+  if (action.includes('SCAN') || action.includes('CYCLE')) return <RefreshCw size={11} className="text-sky-400 shrink-0" />;
+  if (action.includes('CLAUDE') || action.includes('DECISION')) return <Bot size={11} className="text-violet-400 shrink-0" />;
+  if (action.includes('SIGNAL')) return <Zap size={11} className="text-amber-400 shrink-0" />;
+  return <Circle size={11} className="text-slate-600 shrink-0" />;
+}
+
+// ─── Toggle ───────────────────────────────────────────────────────────────────
+
+function Toggle({ on, onChange, color = 'emerald', disabled = false }: {
+  on: boolean; onChange: () => void; color?: string; disabled?: boolean;
+}) {
+  const bg = on ? (color === 'amber' ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-slate-700';
+  return (
+    <button
+      onClick={onChange}
+      disabled={disabled}
+      className={`relative w-10 h-5 rounded-full transition-colors ${bg} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-5' : 'left-0.5'}`} />
+    </button>
+  );
+}
+
+// ─── Countdown ────────────────────────────────────────────────────────────────
+
+function useCountdown(lastScanAt: string | null, intervalMinutes = 15): string {
+  const [display, setDisplay] = useState('—');
+  useEffect(() => {
+    const tick = () => {
+      if (!lastScanAt) { setDisplay('—'); return; }
+      const next = new Date(lastScanAt).getTime() + intervalMinutes * 60 * 1000;
+      const remaining = Math.max(0, next - Date.now());
+      if (remaining === 0) { setDisplay('scanning…'); return; }
+      const m = Math.floor(remaining / 60000);
+      const s = Math.floor((remaining % 60000) / 1000);
+      setDisplay(`${m}:${s.toString().padStart(2, '0')}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lastScanAt, intervalMinutes]);
+  return display;
 }
 
 // ─── SignalCard ────────────────────────────────────────────────────────────────
 
-function SignalCard({ signal }: { signal: Signal }) {
-  const [expanded, setExpanded] = useState(false);
+function SignalCard({ signal, active }: { signal: Signal; active: boolean }) {
+  const [showFull, setShowFull] = useState(false);
   const ind = parseIndicators(signal.indicators);
   const reasoning = ind.reasoning ?? ind.skip_reason ?? ind.skipReason ?? null;
   const rr = ind.risk_reward ?? ind.riskReward ?? ind.riskRewardRatio ?? null;
+  const PREVIEW_LEN = 200;
 
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`rounded-xl border p-4 transition-colors ${directionBg(signal.direction)}`}
+      className={`rounded-xl border p-4 transition-all ${directionBg(signal.direction)} ${active ? 'ring-1 ring-violet-500/40' : ''}`}
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-bold text-white tracking-wide">{signal.symbol}</span>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-white">{signal.symbol}</span>
           <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
             signal.direction === 'BUY'
               ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
@@ -153,29 +201,30 @@ function SignalCard({ signal }: { signal: Signal }) {
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 border border-violet-500/30 text-violet-300">EXECUTED</span>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-slate-500">{signal.timeframe}</span>
-          <span className="text-xs text-slate-600">{timeAgo(signal.createdAt)}</span>
+        <div className="flex items-center gap-2 text-xs text-slate-500 shrink-0">
+          <span>{signal.timeframe}</span>
+          <span>·</span>
+          <span>{timeAgo(signal.createdAt)}</span>
         </div>
       </div>
 
-      {/* Confidence bar */}
+      {/* Confidence + R:R */}
       <div className="flex items-center gap-2 mb-3">
         <div className="flex-1 h-1.5 bg-slate-700/70 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all ${confidenceBar(signal.confidence)}`}
+            className={`h-full rounded-full transition-all ${confidenceColor(signal.confidence)}`}
             style={{ width: `${signal.confidence}%` }}
           />
         </div>
         <span className="text-xs font-semibold text-slate-300 w-8 text-right">{Math.round(signal.confidence)}%</span>
         {rr !== null && (
-          <span className="text-xs text-slate-500 w-16 text-right">R:R {Number(rr).toFixed(2)}</span>
+          <span className="text-xs text-slate-500 w-16 text-right font-mono">R:R {Number(rr).toFixed(2)}</span>
         )}
       </div>
 
       {/* Price levels */}
       {signal.direction !== 'HOLD' && (
-        <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
+        <div className="grid grid-cols-3 gap-1.5 mb-3 text-xs">
           {[
             { label: 'Entry', value: formatPrice(signal.entryPrice, signal.symbol), color: 'text-white' },
             { label: 'SL', value: formatPrice(signal.stopLoss, signal.symbol), color: 'text-rose-400' },
@@ -189,42 +238,69 @@ function SignalCard({ signal }: { signal: Signal }) {
         </div>
       )}
 
-      {/* Reasoning */}
-      {reasoning && (
-        <div>
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors w-full text-left"
-          >
-            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-            <span className={expanded ? '' : 'truncate'}>
-              {expanded ? 'Hide reasoning' : reasoning.slice(0, 90) + (reasoning.length > 90 ? '…' : '')}
-            </span>
-          </button>
-          <AnimatePresence>
-            {expanded && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
-                <p className="mt-2 text-xs text-slate-400 leading-relaxed bg-slate-900/60 rounded-lg p-3 border border-slate-700/40">
-                  {reasoning}
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+      {/* Reasoning — always visible */}
+      {reasoning ? (
+        <div className="bg-slate-900/60 rounded-lg p-3 border border-slate-700/40">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Bot size={11} className="text-violet-400" />
+            <span className="text-[10px] font-semibold text-violet-400 uppercase tracking-wide">Claude Reasoning</span>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            {showFull || reasoning.length <= PREVIEW_LEN
+              ? reasoning
+              : reasoning.slice(0, PREVIEW_LEN) + '…'}
+          </p>
+          {reasoning.length > PREVIEW_LEN && (
+            <button
+              onClick={() => setShowFull(v => !v)}
+              className="flex items-center gap-1 mt-2 text-[10px] text-slate-500 hover:text-violet-400 transition-colors"
+            >
+              {showFull ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+              {showFull ? 'Show less' : 'Read full reasoning'}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bg-slate-900/40 rounded-lg p-3 border border-slate-700/30 text-center">
+          <p className="text-[10px] text-slate-600 italic">No reasoning available yet — agent hasn't completed a scan cycle</p>
         </div>
       )}
     </motion.div>
   );
 }
 
+// ─── NewsCard ─────────────────────────────────────────────────────────────────
+
+function NewsCard({ item }: { item: NewsItem }) {
+  return (
+    <a
+      href={item.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block group p-3 rounded-xl border border-slate-800 hover:border-slate-600 bg-slate-900/40 hover:bg-slate-800/60 transition-all"
+    >
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${reliabilityColor(item.reliability)}`}>
+            {item.source}
+          </span>
+          {item.date && <span className="text-[10px] text-slate-600">{item.date}</span>}
+        </div>
+        <ExternalLink size={11} className="text-slate-600 group-hover:text-slate-400 transition-colors shrink-0 mt-0.5" />
+      </div>
+      <p className="text-xs text-slate-200 font-medium leading-snug group-hover:text-white transition-colors line-clamp-2">
+        {item.title}
+      </p>
+      {item.snippet && (
+        <p className="text-[10px] text-slate-500 mt-1 leading-relaxed line-clamp-2">{item.snippet}</p>
+      )}
+    </a>
+  );
+}
+
 // ─── TradeRow ─────────────────────────────────────────────────────────────────
 
 function TradeRow({ trade }: { trade: Trade }) {
-  const isOpen = trade.status === 'OPEN';
   return (
     <div className="flex items-center gap-2 py-2 border-b border-slate-800 last:border-0 text-xs">
       <div className={`w-1 h-6 rounded-full shrink-0 ${trade.direction === 'BUY' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
@@ -232,7 +308,7 @@ function TradeRow({ trade }: { trade: Trade }) {
         <div className="flex items-center gap-1.5">
           <span className="font-semibold text-white">{trade.symbol}</span>
           <span className={`text-[10px] font-bold ${trade.direction === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>{trade.direction}</span>
-          <span className="text-slate-600 text-[10px]">{trade.lotSize} lot</span>
+          <span className="text-slate-600 text-[10px]">{trade.lotSize}L</span>
         </div>
         <div className="text-slate-500 text-[10px] font-mono">
           {formatPrice(trade.entryPrice, trade.symbol)}
@@ -240,7 +316,7 @@ function TradeRow({ trade }: { trade: Trade }) {
         </div>
       </div>
       <div className="text-right shrink-0">
-        {isOpen ? (
+        {trade.status === 'OPEN' ? (
           <span className="text-sky-400 font-semibold">OPEN</span>
         ) : (
           <span className={`font-bold ${pnlColor(trade.pnl)}`}>
@@ -262,7 +338,7 @@ function AuditRow({ log }: { log: AuditLog }) {
 
   return (
     <div className="flex items-start gap-2 py-2 border-b border-slate-800/70 last:border-0">
-      <div className="mt-0.5">{actionIcon(log.action)}</div>
+      <div className="mt-0.5 shrink-0">{actionIcon(log.action)}</div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide">
@@ -270,45 +346,11 @@ function AuditRow({ log }: { log: AuditLog }) {
           </span>
           {log.symbol && <span className="text-[10px] text-slate-500">{log.symbol}</span>}
         </div>
-        {summary && (
-          <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed truncate">{summary}</p>
-        )}
+        {summary && <p className="text-[10px] text-slate-500 mt-0.5 truncate">{summary}</p>}
       </div>
       <span className="text-[10px] text-slate-600 shrink-0 mt-0.5">{timeAgo(log.createdAt)}</span>
     </div>
   );
-}
-
-// ─── Toggle ───────────────────────────────────────────────────────────────────
-
-function Toggle({ on, onChange, color = 'emerald' }: { on: boolean; onChange: () => void; color?: string }) {
-  const bg = on ? (color === 'amber' ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-slate-700';
-  return (
-    <button onClick={onChange} className={`relative w-10 h-5 rounded-full transition-colors ${bg}`}>
-      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-5' : 'left-0.5'}`} />
-    </button>
-  );
-}
-
-// ─── Countdown hook ────────────────────────────────────────────────────────────
-
-function useCountdown(lastScanAt: string | null, intervalMinutes = 15): string {
-  const [display, setDisplay] = useState('—');
-  useEffect(() => {
-    const tick = () => {
-      if (!lastScanAt) { setDisplay('—'); return; }
-      const next = new Date(lastScanAt).getTime() + intervalMinutes * 60 * 1000;
-      const remaining = Math.max(0, next - Date.now());
-      if (remaining === 0) { setDisplay('Now'); return; }
-      const m = Math.floor(remaining / 60000);
-      const s = Math.floor((remaining % 60000) / 1000);
-      setDisplay(`${m}:${s.toString().padStart(2, '0')}`);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [lastScanAt, intervalMinutes]);
-  return display;
 }
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
@@ -318,13 +360,18 @@ export default function Dashboard() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
+  const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [midTab, setMidTab] = useState<'signals' | 'news'>('signals');
+  const [filterSymbol, setFilterSymbol] = useState<string | null>(null);
   const _lastRefresh = useRef(Date.now());
 
   const countdown = useCountdown(agent?.lastScanAt ?? null);
 
+  // Fetch agent/signals/trades/audit every 10s
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true);
     try {
@@ -345,11 +392,24 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Fetch news separately (slower, every 5 min)
+  const fetchNews = useCallback(async () => {
+    setNewsLoading(true);
+    try {
+      const res = await fetch('/api/forex/news');
+      const data = await res.json();
+      if (data.results) setNews(data.results);
+    } catch { /* silently fail */ }
+    finally { setNewsLoading(false); }
+  }, []);
+
   useEffect(() => {
     fetchAll();
-    const id = setInterval(() => fetchAll(true), 10000);
-    return () => clearInterval(id);
-  }, [fetchAll]);
+    fetchNews();
+    const fast = setInterval(() => fetchAll(true), 10000);
+    const slow = setInterval(fetchNews, 300000); // 5 min
+    return () => { clearInterval(fast); clearInterval(slow); };
+  }, [fetchAll, fetchNews]);
 
   const toggleAgent = async () => {
     if (!agent || toggling) return;
@@ -382,11 +442,18 @@ export default function Dashboard() {
 
   const watchList = agent?.watchSymbols?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
 
+  // Symbols that have signals
+  const signalSymbols = [...new Set(signals.map(s => s.symbol))];
+
+  const filteredSignals = filterSymbol
+    ? signals.filter(s => s.symbol === filterSymbol)
+    : signals;
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="flex items-center gap-3 text-slate-400">
-          <RefreshCw size={20} className="animate-spin" />
+          <RefreshCw size={18} className="animate-spin" />
           <span className="text-sm">Connecting to trading database…</span>
         </div>
       </div>
@@ -401,8 +468,8 @@ export default function Dashboard() {
         <div className="max-w-screen-2xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
 
           <div className="flex items-center gap-3">
-            <Bot size={20} className="text-violet-400" />
-            <span className="font-bold text-white tracking-tight text-sm">AI Trading Agent</span>
+            <Bot size={18} className="text-violet-400" />
+            <span className="font-bold text-white text-sm">AI Trading Agent</span>
             <div className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
               agent?.isRunning
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
@@ -419,17 +486,17 @@ export default function Dashboard() {
 
           <div className="hidden md:flex items-center gap-6 text-sm">
             <div className="flex items-center gap-1.5">
-              <DollarSign size={14} className="text-slate-500" />
+              <DollarSign size={13} className="text-slate-500" />
               <span className="text-white font-semibold">${(agent?.balance ?? 0).toLocaleString('en', { minimumFractionDigits: 2 })}</span>
-              <span className="text-slate-500 text-xs">{agent?.currency ?? 'USD'}</span>
+              <span className="text-slate-600 text-xs">{agent?.currency ?? 'USD'}</span>
             </div>
             <div className={`flex items-center gap-1.5 font-semibold ${todayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {todayPnl >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+              {todayPnl >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
               <span>{todayPnl >= 0 ? '+' : ''}${todayPnl.toFixed(2)} today</span>
             </div>
             {agent?.isRunning && (
               <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Clock size={12} />
+                <Clock size={11} />
                 next scan <span className="text-slate-300 font-mono">{countdown}</span>
               </div>
             )}
@@ -440,8 +507,9 @@ export default function Dashboard() {
               onClick={() => fetchAll(false)}
               disabled={refreshing}
               className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Refresh"
             >
-              <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             </button>
             <button
               onClick={toggleAgent}
@@ -461,7 +529,7 @@ export default function Dashboard() {
       {/* ── Grid ── */}
       <div className="max-w-screen-2xl mx-auto px-4 py-5 grid grid-cols-1 lg:grid-cols-[260px_1fr_290px] gap-5 items-start">
 
-        {/* ── Left ── */}
+        {/* ── Left: Controls ── */}
         <div className="space-y-4">
 
           {/* Agent controls */}
@@ -476,7 +544,7 @@ export default function Dashboard() {
                   <span className={`w-2 h-2 rounded-full ${agent?.isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
                   Running
                 </div>
-                <Toggle on={agent?.isRunning ?? false} onChange={toggleAgent} />
+                <Toggle on={agent?.isRunning ?? false} onChange={toggleAgent} disabled={toggling} />
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm text-slate-300">
@@ -486,7 +554,6 @@ export default function Dashboard() {
                 <Toggle on={agent?.autoTrade ?? false} onChange={toggleAutoTrade} color="amber" />
               </div>
             </div>
-
             <div className="mt-4 pt-4 border-t border-slate-800 space-y-2.5 text-xs">
               <div className="flex justify-between">
                 <span className="text-slate-500">Last scan</span>
@@ -546,9 +613,7 @@ export default function Dashboard() {
                 {watchList.map(sym => {
                   const clean = sym.replace('=X', '');
                   const sig = signals.find(s =>
-                    s.symbol === sym ||
-                    s.symbol === clean ||
-                    s.symbol.replace('/', '') === clean
+                    s.symbol === sym || s.symbol === clean || s.symbol.replace('/', '') === clean
                   );
                   const dir = sig?.direction;
                   return (
@@ -566,32 +631,135 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* ── Middle: Signals ── */}
+        {/* ── Middle: Signals / News tabs ── */}
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Zap size={15} className="text-amber-400" />
-              <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Latest Signals</h2>
-              <span className="text-xs text-slate-600 bg-slate-800 px-2 py-0.5 rounded-full">{signals.length}</span>
-            </div>
-            {signals[0] && (
-              <span className="text-xs text-slate-600">Updated {timeAgo(signals[0].createdAt)}</span>
-            )}
+          {/* Tab bar */}
+          <div className="flex items-center gap-1 mb-4 bg-slate-900 border border-slate-800 rounded-xl p-1 w-fit">
+            <button
+              onClick={() => setMidTab('signals')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                midTab === 'signals'
+                  ? 'bg-slate-700 text-white shadow'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Zap size={12} />
+              Signals
+              {signals.length > 0 && (
+                <span className={`text-[10px] px-1.5 rounded-full ${midTab === 'signals' ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-700 text-slate-500'}`}>
+                  {signals.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setMidTab('news')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                midTab === 'news'
+                  ? 'bg-slate-700 text-white shadow'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Newspaper size={12} />
+              News
+              {newsLoading
+                ? <RefreshCw size={10} className="animate-spin text-slate-500" />
+                : news.length > 0 && (
+                  <span className={`text-[10px] px-1.5 rounded-full ${midTab === 'news' ? 'bg-sky-500/30 text-sky-300' : 'bg-slate-700 text-slate-500'}`}>
+                    {news.length}
+                  </span>
+                )
+              }
+            </button>
           </div>
 
-          {signals.length === 0 ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
-              <Bot size={28} className="text-slate-700 mx-auto mb-3" />
-              <p className="text-slate-500 text-sm">No signals yet</p>
-              <p className="text-slate-700 text-xs mt-1">
-                {agent?.isRunning ? 'Agent is scanning — signals appear here after each cycle' : 'Start the agent to begin scanning markets'}
-              </p>
+          {/* Signals tab */}
+          {midTab === 'signals' && (
+            <div>
+              {/* Symbol filter */}
+              {signalSymbols.length > 1 && (
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <Filter size={12} className="text-slate-600" />
+                  <button
+                    onClick={() => setFilterSymbol(null)}
+                    className={`text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                      filterSymbol === null
+                        ? 'bg-slate-700 border-slate-600 text-white'
+                        : 'border-slate-700 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {signalSymbols.map(sym => (
+                    <button
+                      key={sym}
+                      onClick={() => setFilterSymbol(f => f === sym ? null : sym)}
+                      className={`text-xs px-2.5 py-1 rounded-lg border transition-all font-mono ${
+                        filterSymbol === sym
+                          ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
+                          : 'border-slate-700 text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {sym}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {filteredSignals.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
+                  <Bot size={28} className="text-slate-700 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm">No signals yet</p>
+                  <p className="text-slate-700 text-xs mt-1">
+                    {agent?.isRunning
+                      ? 'Agent is scanning — signals appear after the first cycle completes'
+                      : 'Start the agent to begin scanning markets'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <AnimatePresence>
+                    {filteredSignals.map(sig => (
+                      <SignalCard
+                        key={sig.id}
+                        signal={sig}
+                        active={filterSymbol === sig.symbol}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="space-y-3">
-              <AnimatePresence>
-                {signals.map(sig => <SignalCard key={sig.id} signal={sig} />)}
-              </AnimatePresence>
+          )}
+
+          {/* News tab */}
+          {midTab === 'news' && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-slate-500">
+                  {news.length > 0
+                    ? `${news.length} articles from Reuters, BBC, ForexLive & more`
+                    : 'Loading news feeds…'}
+                </p>
+                <button
+                  onClick={fetchNews}
+                  disabled={newsLoading}
+                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  <RefreshCw size={11} className={newsLoading ? 'animate-spin' : ''} />
+                  Refresh
+                </button>
+              </div>
+
+              {news.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
+                  <Newspaper size={28} className="text-slate-700 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm">{newsLoading ? 'Fetching news…' : 'No news loaded'}</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {news.map((item, i) => <NewsCard key={i} item={item} />)}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -659,7 +827,7 @@ export default function Dashboard() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-slate-800/50 mt-8 py-4 text-center text-xs text-slate-700">
-        AI Trading Agent · Powered by Claude claude-sonnet-4-6 · Refreshes every 10s
+        AI Trading Agent · Claude claude-sonnet-4-6 · Signals refresh every 10s · News every 5min
       </footer>
     </div>
   );
