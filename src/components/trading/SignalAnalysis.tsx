@@ -20,7 +20,9 @@ interface SignalAnalysisProps {
   signalResults: SignalResult[];
   aiAnalysis: AIAnalysis | null;
   isAIAnalyzing: boolean;
+  aiCooldown: number;
   formatPrice: (p: number) => string;
+  onAnalyzeAI?: () => void;
 }
 
 // Safe price formatter — handles undefined/null without crashing
@@ -59,7 +61,7 @@ function SentimentBar({ score }: { score: number }) {
 
 export default function SignalAnalysis({
   selectedSymbol, timeframe, combinedSignal, signalResults,
-  aiAnalysis, isAIAnalyzing, formatPrice,
+  aiAnalysis, isAIAnalyzing, aiCooldown, formatPrice, onAnalyzeAI,
 }: SignalAnalysisProps) {
   const [reasonExpanded, setReasonExpanded] = useState(false);
 
@@ -107,6 +109,20 @@ export default function SignalAnalysis({
             </>
           )}
         </Badge>
+        {onAnalyzeAI && !isAIAnalyzing && (
+          <button
+            onClick={onAnalyzeAI}
+            disabled={aiCooldown > 0}
+            className={cn(
+              'text-[10px] px-2 py-0.5 rounded-md font-medium transition-all',
+              aiCooldown > 0
+                ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                : 'bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer'
+            )}
+          >
+            {aiCooldown > 0 ? `${aiCooldown}s` : 'AI Analyze'}
+          </button>
+        )}
       </div>
 
       {/* AI Analysis Panel */}

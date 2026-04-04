@@ -47,7 +47,9 @@ export default function TradingTerminal() {
   const [combinedSignal, setCombinedSignal] = useState<Record<string, unknown> | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [isAIAnalyzing, setIsAIAnalyzing] = useState(false);
+  const [aiCooldown, setAiCooldown] = useState(0);
   const aiAbortRef = useRef<AbortController | null>(null);
+  const lastAiCallRef = useRef(0);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradeStats, setTradeStats] = useState<Record<string, unknown> | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -196,8 +198,23 @@ export default function TradingTerminal() {
 
   // Slow AI analysis (10-30s — LLM reasoning with news/sentiment)
   const analyzeSymbolWithAI = useCallback(async (symbol: string, tf: string) => {
+    // Rate-limit protection: minimum 30s between AI calls
+    const now = Date.now();
+    const elapsed = now - lastAiCallRef.current;
+    const minInterval = 30000;
+    if (elapsed < minInterval) {
+      const wait = Math.ceil((minInterval - elapsed) / 1000);
+      toast({ title: 'AI Cooling Down', description: `Wait ${wait}s before next analysis`, variant: 'destructive' });
+      setAiCooldown(Math.ceil((minInterval - elapsed) / 1000));
+      const cdInterval = setInterval(() => {
+        setAiCooldown(prev => { if (prev <= 1) { clearInterval(cdInterval); return 0; } return prev - 1; });
+      }, 1000);
+      return;
+    }
+
     setIsAIAnalyzing(true);
     setAiAnalysis(null);
+    lastAiCallRef.current = now;
     if (aiAbortRef.current) aiAbortRef.current.abort();
     const ctrl = new AbortController();
     aiAbortRef.current = ctrl;
@@ -215,7 +232,7 @@ export default function TradingTerminal() {
       if ((e as Error).name !== 'AbortError') console.error('AI analysis failed:', e);
     }
     setIsAIAnalyzing(false);
-  }, [soundEnabled]);
+  }, [soundEnabled, toast]);
 
   const runScan = useCallback(async () => {
     setIsScanning(true);
@@ -367,7 +384,7 @@ export default function TradingTerminal() {
   // ==================== EFFECTS ====================
   useEffect(() => { fetchQuotes(); fetchAgentState(); fetchTrades(); }, [fetchQuotes, fetchAgentState, fetchTrades]);
   useEffect(() => { analyzeSymbol(); }, [selectedSymbol, timeframe, analyzeSymbol]);
-  useEffect(() => { analyzeSymbolWithAI(selectedSymbol, timeframe); }, [selectedSymbol, timeframe]);
+  // AI analysis is ON-DEMAND only (user clicks button) — no auto-fire to avoid rate limits
   useEffect(() => { const i = setInterval(fetchQuotes, 30000); return () => clearInterval(i); }, [fetchQuotes]);
   useEffect(() => {
     if (agentState?.isRunning && agentState.autoTrade) { scanIntervalRef.current = setInterval(runScan, scanInterval * 1000); return () => { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); }; }
@@ -447,7 +464,7 @@ export default function TradingTerminal() {
 
           {/* Signal Analysis */}
           <div className="border-t border-border px-3 py-3 bg-card/30">
-            <SignalAnalysis selectedSymbol={selectedSymbol} timeframe={timeframe} signalResults={signalResults} combinedSignal={combinedSignal} aiAnalysis={aiAnalysis} isAIAnalyzing={isAIAnalyzing} formatPrice={formatPrice} />
+            <SignalAnalysis selectedSymbol={selectedSymbol} timeframe={timeframe} signalResults={signalResults} combinedSignal={combinedSignal} aiAnalysis={aiAnalysis} isAIAnalyzing={isAIAnalyzing} aiCooldown={aiCooldown} formatPrice={formatPrice} onAnalyzeAI={() => analyzeSymbolWithAI(selectedSymbol, timeframe)} />
             <PriceAlerts alerts={alerts} open={alertsOpen} setOpen={setAlertsOpen} newAlert={{ symbol: newAlertSymbol, setSymbol: setNewAlertSymbol, condition: newAlertCondition, setCondition: setNewAlertCondition, price: newAlertPrice, setPrice: setNewAlertPrice, submitting: alertSubmitting, onSubmit: createAlert }} onDelete={deleteAlert} onNewTrade={() => setTradeDialogOpen(true)} />
           </div>
         </div>
