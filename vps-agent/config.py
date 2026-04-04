@@ -9,7 +9,7 @@ load_dotenv()
 
 # ─── Claude API ───────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY: str = os.environ["ANTHROPIC_API_KEY"]
-CLAUDE_MODEL: str = "claude-opus-4-6"
+CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 DATABASE_URL: str = os.environ["DATABASE_URL"]
