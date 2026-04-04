@@ -185,7 +185,7 @@ async def health_check():
         terminal = mt5.terminal_info()
         account = mt5.account_info()
         info = {
-            "mt5_version": str(terminal.version_build) if terminal else "unknown",
+            "mt5_version": str(getattr(terminal, 'version_build', getattr(terminal, 'build', 'unknown'))) if terminal else "unknown",
             "account": str(account.login) if account else "unknown",
             "server": str(account.server) if account else "unknown",
             "connected": True,
