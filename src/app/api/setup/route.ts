@@ -10,7 +10,6 @@ export async function GET() {
     }
     const sql = neon(url);
 
-    // Create each table separately using .query() for raw SQL
     await sql.query(`
       CREATE TABLE IF NOT EXISTS "Trade" (
         "id" TEXT NOT NULL PRIMARY KEY,
@@ -25,8 +24,8 @@ export async function GET() {
         "status" TEXT NOT NULL DEFAULT 'OPEN',
         "signalId" TEXT,
         "strategy" TEXT,
-        "openTime" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "closeTime" DATETIME,
+        "openTime" TIMESTAMP NOT NULL DEFAULT NOW(),
+        "closeTime" TIMESTAMP,
         "notes" TEXT
       )
     `);
@@ -45,8 +44,8 @@ export async function GET() {
         "indicators" TEXT NOT NULL,
         "executed" BOOLEAN NOT NULL DEFAULT false,
         "tradeId" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "expiresAt" DATETIME
+        "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+        "expiresAt" TIMESTAMP
       )
     `);
 
@@ -64,9 +63,9 @@ export async function GET() {
         "watchSymbols" TEXT NOT NULL DEFAULT 'EURUSD=X,GBPUSD=X,USDJPY=X,XAUUSD=X,BTCUSD=X',
         "timeframe" TEXT NOT NULL DEFAULT '1h',
         "mt5Connected" BOOLEAN NOT NULL DEFAULT false,
-        "lastScanAt" DATETIME,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL
+        "lastScanAt" TIMESTAMP,
+        "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
 
@@ -78,22 +77,21 @@ export async function GET() {
         "price" REAL NOT NULL,
         "isActive" BOOLEAN NOT NULL DEFAULT true,
         "triggered" BOOLEAN NOT NULL DEFAULT false,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "triggeredAt" DATETIME
+        "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+        "triggeredAt" TIMESTAMP
       )
     `);
 
     await sql.query(`
       CREATE TABLE IF NOT EXISTS "WatchlistGroup" (
         "id" TEXT NOT NULL PRIMARY KEY,
-        "name" TEXT NOT NULL,
+        "name" TEXT NOT NULL UNIQUE,
         "symbols" TEXT NOT NULL,
         "isBuiltIn" BOOLEAN NOT NULL DEFAULT false,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
 
-    // Insert default agent state if not exists
     await sql.query(`
       INSERT INTO "AgentState" ("id")
       SELECT 'main'
