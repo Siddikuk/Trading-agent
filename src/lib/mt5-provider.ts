@@ -174,21 +174,28 @@ export async function isMT5Connected(): Promise<boolean> {
     return false;
   }
 
-  try {
-    const url = `${bridgeUrl.replace(/\/+$/, '')}/api/mt5/health`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    connectionStatus = {
-      connected: res.ok,
-      lastCheck: Date.now(),
-    };
-    return res.ok;
-  } catch {
-    connectionStatus = { connected: false, lastCheck: Date.now() };
-    return false;
+  const base = bridgeUrl.replace(/\/+$/, '');
+
+  // Try /api/mt5/health first, fallback to /api/mt5/account (some bridge versions have health issues)
+  const endpoints = ['/api/mt5/health', '/api/mt5/account'];
+
+  for (const path of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`${base}${path}`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        connectionStatus = { connected: true, lastCheck: Date.now() };
+        return true;
+      }
+    } catch {
+      // Try next endpoint
+    }
   }
+
+  connectionStatus = { connected: false, lastCheck: Date.now() };
+  return false;
 }
 
 export async function fetchMT5Quotes(symbols: string[]): Promise<MT5Quote[] | null> {
