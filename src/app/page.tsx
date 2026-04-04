@@ -1,504 +1,666 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Activity, Settings, Wifi, WifiOff, Volume2, VolumeX, Plus,
+  Bot, Activity, TrendingUp, TrendingDown, Minus,
+  RefreshCw, ChevronDown, ChevronUp, Shield, Zap,
+  Clock, DollarSign, BarChart2, AlertCircle, CheckCircle2,
+  Circle, Wifi, WifiOff, ArrowUpRight, ArrowDownRight,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Tooltip, TooltipTrigger, TooltipContent,
-} from '@/components/ui/tooltip';
-import { useToast } from '@/hooks/use-toast';
 
-// Trading components
-import CandlestickChart, { type CandleData, type IndicatorData } from '@/components/trading/CandlestickChart';
-import TickerStrip from '@/components/trading/TickerStrip';
-import SettingsDialog from '@/components/trading/SettingsDialog';
-import MT5SetupWizard from '@/components/trading/MT5SetupWizard';
-import NewTradeDialog from '@/components/trading/NewTradeDialog';
-import SignalAnalysis from '@/components/trading/SignalAnalysis';
-import PriceAlerts from '@/components/trading/PriceAlerts';
-import AgentTab from '@/components/trading/AgentTab';
-import TradesTab from '@/components/trading/TradesTab';
-import MT5Tab from '@/components/trading/MT5Tab';
-import NewsTab from '@/components/trading/NewsTab';
-import StatsTab from '@/components/trading/StatsTab';
-import ScanLog from '@/components/trading/ScanLog';
-import Footer from '@/components/trading/Footer';
-import type { Quote, Trade, AgentState, SignalResult, AIAnalysis, NewsItem, PriceAlert, PerformanceStats, MT5Account, MT5Position, DataSource } from '@/components/trading/types';
-import { SYMBOLS, TIMEFRAMES } from '@/components/trading/types';
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-// ==================== MAIN APP ====================
-export default function TradingTerminal() {
-  const { toast } = useToast();
+interface AgentState {
+  id: string;
+  isRunning: boolean;
+  autoTrade: boolean;
+  balance: number;
+  currency: string;
+  maxRiskPercent: number;
+  watchSymbols: string;
+  lastScanAt: string | null;
+  mt5Connected: boolean;
+  updatedAt: string;
+}
 
-  // Core state
-  const [selectedSymbol, setSelectedSymbol] = useState('EUR/USD');
-  const [timeframe, setTimeframe] = useState('1h');
-  const [agentState, setAgentState] = useState<AgentState | null>(null);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [candles, setCandles] = useState<CandleData[]>([]);
-  const [indicators, setIndicators] = useState<IndicatorData>({});
-  const [signalResults, setSignalResults] = useState<SignalResult[]>([]);
-  const [combinedSignal, setCombinedSignal] = useState<Record<string, unknown> | null>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
-  const [isAIAnalyzing, setIsAIAnalyzing] = useState(false);
-  const [aiCooldown, setAiCooldown] = useState(0);
-  const aiAbortRef = useRef<AbortController | null>(null);
-  const lastAiCallRef = useRef(0);
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [tradeStats, setTradeStats] = useState<Record<string, unknown> | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(false);
-  const [scanLog, setScanLog] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState('trades');
-  const [showSettings, setShowSettings] = useState(false);
-  const [showWizard, setShowWizard] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+interface Signal {
+  id: string;
+  symbol: string;
+  direction: string;
+  confidence: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  strategy: string;
+  timeframe: string;
+  indicators: string;
+  executed: boolean;
+  createdAt: string;
+}
 
-  // Settings state
-  const [strategiesEnabled, setStrategiesEnabled] = useState({ RSI: true, MACD: true, Bollinger: true, Trend: true });
-  const [scanInterval, setScanInterval] = useState(120);
-  const [defaultLotSize, setDefaultLotSize] = useState(0.1);
-  const [maxConcurrent, setMaxConcurrent] = useState(3);
+interface Trade {
+  id: string;
+  symbol: string;
+  direction: string;
+  lotSize: number;
+  entryPrice: number;
+  exitPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  pnl: number | null;
+  status: string;
+  openTime: string;
+  closeTime: string | null;
+  strategy: string | null;
+}
 
-  // MT5 state
-  const [mt5BridgeUrl, setMt5BridgeUrl] = useState<string | null>(null);
-  const [mt5Connected, setMt5Connected] = useState(false);
-  const [mt5Account, setMt5Account] = useState<MT5Account | null>(null);
-  const [mt5Positions, setMt5Positions] = useState<MT5Position[]>([]);
-  const [dataSource, setDataSource] = useState<DataSource>(null);
-  const mt5ConnectingRef = useRef(false);
+interface AuditLog {
+  id: string;
+  action: string;
+  symbol: string | null;
+  details: string | null;
+  createdAt: string;
+}
 
-  // News / perf / alerts state
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [newsLoading, setNewsLoading] = useState(false);
-  const [perfStats, setPerfStats] = useState<PerformanceStats | null>(null);
-  const [perfLoading, setPerfLoading] = useState(false);
-  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
-  const [alertsOpen, setAlertsOpen] = useState(true);
-  const [newAlertSymbol, setNewAlertSymbol] = useState('EUR/USD');
-  const [newAlertCondition, setNewAlertCondition] = useState('above');
-  const [newAlertPrice, setNewAlertPrice] = useState('');
-  const [alertSubmitting, setAlertSubmitting] = useState(false);
-  const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
-  const [tradeForm, setTradeForm] = useState({ symbol: 'EUR/USD', direction: 'BUY', lotSize: 0.1, entryPrice: '', stopLoss: '', takeProfit: '', strategy: 'Manual' });
-  const [tradeSubmitting, setTradeSubmitting] = useState(false);
+interface ParsedIndicators {
+  reasoning?: string;
+  skip_reason?: string;
+  skipReason?: string;
+  risk_reward?: number;
+  riskReward?: number;
+  riskRewardRatio?: number;
+  confluence?: string;
+  sentiment_score?: number;
+  sentimentScore?: number;
+  [key: string]: unknown;
+}
 
-  // ==================== MT5 BRIDGE CONNECTION ====================
-  // All MT5 communication goes through server-side API proxy (no direct WebSocket from browser)
-  // This avoids HTTPS → ws:// mixed content security errors
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  const testMT5Connection = useCallback(async (url: string): Promise<boolean> => {
-    try {
-      // Save URL to server-side config first
-      await fetch('/api/forex/mt5/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      // Then test the connection via server-side proxy
-      const r = await fetch('/api/forex/mt5/config');
-      const d = await r.json();
-      return d.connected === true;
-    } catch {
-      return false;
-    }
-  }, []);
+function timeAgo(dateStr: string): string {
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 60) return `${Math.floor(diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
 
-  // Initialize MT5 from localStorage and auto-test on mount
-  useEffect(() => {
-    let savedUrl = localStorage.getItem('mt5_bridge_url');
-    // Migration: if old direct IP URL, clear it — user needs to re-enter tunnel URL
-    if (savedUrl && (savedUrl.includes('51.68.205.91') || savedUrl.includes(':8080'))) {
-      localStorage.removeItem('mt5_bridge_url');
-      savedUrl = null;
-    }
-    if (savedUrl) {
-      setMt5BridgeUrl(savedUrl);
-      // Auto-test connection via server proxy — also save to server
-      fetch('/api/forex/mt5/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: savedUrl }),
-      }).then(() => testMT5Connection(savedUrl).then(ok => setMt5Connected(ok)));
-    }
-  }, [testMT5Connection]);
+function formatPrice(price: number, symbol: string): string {
+  const decimals = symbol.includes('JPY') ? 3 : symbol.includes('XAU') ? 2 : 5;
+  return price.toFixed(decimals);
+}
 
-  const fetchMT5Data = useCallback(async () => {
-    if (!mt5BridgeUrl) return;
-    try {
-      const headers = { 'X-MT5-Bridge-Url': mt5BridgeUrl };
-      const [accRes, posRes] = await Promise.allSettled([
-        fetch('/api/forex/mt5/account', { headers }),
-        fetch('/api/forex/mt5/positions', { headers }),
-      ]);
-      if (accRes.status === 'fulfilled' && accRes.value.ok) {
-        try {
-          const accData = await accRes.value.json();
-          if (accData.balance !== undefined) {
-            setMt5Account(accData);
-            setMt5Connected(true);
-          }
-        } catch {}
-      }
-      if (posRes.status === 'fulfilled' && posRes.value.ok) {
-        try {
-          const posData = await posRes.value.json();
-          if (posData.positions) setMt5Positions(posData.positions);
-        } catch {}
-      }
-    } catch {}
-  }, [mt5BridgeUrl]);
+function parseIndicators(raw: string): ParsedIndicators {
+  try { return JSON.parse(raw); } catch { return {}; }
+}
 
-  // Auto-refresh MT5 data every 5s when connected
-  useEffect(() => {
-    if (!mt5Connected) return;
-    const interval = setInterval(fetchMT5Data, 5000);
-    return () => clearInterval(interval);
-  }, [mt5Connected, fetchMT5Data]);
+function directionBg(dir: string): string {
+  if (dir === 'BUY') return 'bg-emerald-500/10 border-emerald-500/30';
+  if (dir === 'SELL') return 'bg-rose-500/10 border-rose-500/30';
+  return 'bg-slate-800/50 border-slate-700/40';
+}
 
-  // ==================== DATA FETCHING ====================
-  const fetchQuotes = useCallback(async () => {
-    try {
-      const r = await fetch('/api/forex/market');
-      const d = await r.json();
-      if (d.data) setQuotes(d.data);
-      if (d.dataSource) setDataSource(d.dataSource as DataSource);
-    } catch {}
-  }, []);
+function pnlColor(pnl: number | null): string {
+  if (pnl === null) return 'text-slate-400';
+  return pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+}
 
-  const fetchAgentState = useCallback(async () => { try { const r = await fetch('/api/forex/agent'); const d = await r.json(); if (d.state) setAgentState(d.state); } catch {} }, []);
-  const fetchTrades = useCallback(async () => { try { const r = await fetch('/api/forex/trades'); const d = await r.json(); if (d.trades) setTrades(d.trades); if (d.stats) setTradeStats(d.stats); } catch {} }, []);
-  const fetchNews = useCallback(async () => { setNewsLoading(true); try { const r = await fetch('/api/forex/news'); const d = await r.json(); if (d.error) { console.error('[News] API error:', d.error); setNews([]); } else if (d.results) setNews(d.results); } catch (err) { console.error('[News] Fetch error:', err); } setNewsLoading(false); }, []);
-  const fetchPerformance = useCallback(async () => { setPerfLoading(true); try { const r = await fetch('/api/forex/performance'); const d = await r.json(); if (d) setPerfStats(d); } catch {} setPerfLoading(false); }, []);
-  const fetchAlerts = useCallback(async () => { try { const r = await fetch('/api/forex/alerts'); const d = await r.json(); if (d.alerts) setAlerts(d.alerts); } catch {} }, []);
+function confidenceBar(conf: number): string {
+  if (conf >= 70) return 'bg-emerald-500';
+  if (conf >= 50) return 'bg-amber-500';
+  return 'bg-slate-500';
+}
 
-  // Fast mechanical analysis (instant — for chart + indicators)
-  const analyzeSymbol = useCallback(async () => {
-    setIsAnalyzing(true);
-    setAiAnalysis(null);
-    try {
-      const r = await fetch('/api/forex/signals?symbol=' + selectedSymbol + '&timeframe=' + timeframe);
-      const d = await r.json();
-      if (d.candles) setCandles(d.candles);
-      if (d.indicators) setIndicators(d.indicators);
-      if (d.strategyResults) setSignalResults(d.strategyResults);
-      if (d.combinedSignal) setCombinedSignal(d.combinedSignal);
-      if (d.combinedSignal && d.combinedSignal.confidence >= 70 && soundEnabled) playAlert(d.combinedSignal.direction + ' ' + d.combinedSignal.symbol + ' ' + d.combinedSignal.confidence + '%');
-    } catch {}
-    setIsAnalyzing(false);
-  }, [selectedSymbol, timeframe, soundEnabled]);
+function actionIcon(action: string) {
+  if (action.includes('TRADE') || action.includes('ORDER')) return <ArrowUpRight size={12} className="text-emerald-400 shrink-0" />;
+  if (action.includes('CLOSE')) return <ArrowDownRight size={12} className="text-rose-400 shrink-0" />;
+  if (action.includes('HALT') || action.includes('ERROR') || action.includes('FAIL')) return <AlertCircle size={12} className="text-rose-400 shrink-0" />;
+  if (action.includes('SCAN') || action.includes('CYCLE')) return <RefreshCw size={12} className="text-sky-400 shrink-0" />;
+  if (action.includes('CLAUDE') || action.includes('DECISION')) return <Bot size={12} className="text-violet-400 shrink-0" />;
+  if (action.includes('SIGNAL')) return <Zap size={12} className="text-amber-400 shrink-0" />;
+  return <Circle size={12} className="text-slate-600 shrink-0" />;
+}
 
-  // Slow AI analysis (10-30s — LLM reasoning with news/sentiment)
-  const analyzeSymbolWithAI = useCallback(async (symbol: string, tf: string) => {
-    // Rate-limit protection: minimum 30s between AI calls
-    const now = Date.now();
-    const elapsed = now - lastAiCallRef.current;
-    const minInterval = 30000;
-    if (elapsed < minInterval) {
-      const wait = Math.ceil((minInterval - elapsed) / 1000);
-      toast({ title: 'AI Cooling Down', description: `Wait ${wait}s before next analysis`, variant: 'destructive' });
-      setAiCooldown(Math.ceil((minInterval - elapsed) / 1000));
-      const cdInterval = setInterval(() => {
-        setAiCooldown(prev => { if (prev <= 1) { clearInterval(cdInterval); return 0; } return prev - 1; });
-      }, 1000);
-      return;
-    }
+// ─── SignalCard ────────────────────────────────────────────────────────────────
 
-    setIsAIAnalyzing(true);
-    setAiAnalysis(null);
-    lastAiCallRef.current = now;
-    if (aiAbortRef.current) aiAbortRef.current.abort();
-    const ctrl = new AbortController();
-    aiAbortRef.current = ctrl;
-    try {
-      const r = await fetch('/api/forex/signals?symbol=' + symbol + '&timeframe=' + tf + '&ai=true', { signal: ctrl.signal });
-      const d = await r.json();
-      if (d.aiAnalysis) {
-        setAiAnalysis(d.aiAnalysis);
-        if (d.combinedSignal) setCombinedSignal(d.combinedSignal);
-        if (d.aiAnalysis.shouldTrade && d.aiAnalysis.confidence >= 70 && soundEnabled) {
-          playAlert('AI ' + d.aiAnalysis.direction + ' ' + symbol + ' ' + d.aiAnalysis.confidence + '% confidence');
-        }
-      }
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') console.error('AI analysis failed:', e);
-    }
-    setIsAIAnalyzing(false);
-  }, [soundEnabled, toast]);
+function SignalCard({ signal }: { signal: Signal }) {
+  const [expanded, setExpanded] = useState(false);
+  const ind = parseIndicators(signal.indicators);
+  const reasoning = ind.reasoning ?? ind.skip_reason ?? ind.skipReason ?? null;
+  const rr = ind.risk_reward ?? ind.riskReward ?? ind.riskRewardRatio ?? null;
 
-  const runScan = useCallback(async () => {
-    setIsScanning(true);
-    const ts = new Date().toLocaleTimeString();
-    setScanLog(p => [...p, '[' + ts + '] Scanning ' + SYMBOLS.join(', ') + '...']);
-    try {
-      const r = await fetch('/api/forex/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbols: SYMBOLS, timeframe }) });
-      const d = await r.json();
-      let found = 0;
-      if (d.results) {
-        Object.entries(d.results).forEach(([sym, result]: [string, unknown]) => {
-          const rv = result as Record<string, unknown>;
-          const t = new Date().toLocaleTimeString();
-          if (rv.action === 'TRADE_OPENED') {
-            setScanLog(p => [...p, '[' + t + '] AI OPENED ' + rv.direction + ' ' + sym + ' @ ' + rv.entryPrice + ' (' + rv.confidence + '%)']);
-            if (rv.reasoning) setScanLog(p => [...p, '  Reasoning: ' + String(rv.reasoning).slice(0, 200)]);
-            toast({ title: 'AI Trade Opened', description: rv.direction + ' ' + sym + ' @ ' + rv.entryPrice });
-          } else if (rv.action === 'SIGNAL_ONLY') { found++; setScanLog(p => [...p, '[' + t + '] SIGNAL: ' + rv.direction + ' ' + sym + ' (' + rv.confidence + '%)']); }
-          else if (rv.action === 'HOLD') { setScanLog(p => [...p, '[' + t + '] ' + sym + ': HOLD']); }
-        });
-      }
-      if (found > 0) toast({ title: 'Scan Complete', description: found + ' signal(s) found' });
-    } catch (e) { setScanLog(p => [...p, '[' + new Date().toLocaleTimeString() + '] Error: ' + e]); }
-    setIsScanning(false);
-    fetchTrades();
-  }, [timeframe, fetchTrades, toast]);
-
-  const playAlert = async (text: string) => {
-    try {
-      const r = await fetch('/api/forex/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text.slice(0, 1024) }) });
-      if (r.ok) { const b = await r.blob(); const u = URL.createObjectURL(b); if (audioRef.current) { audioRef.current.src = u; audioRef.current.play().catch(() => {}); } }
-    } catch {}
-  };
-
-  const updateAgent = useCallback(async (u: Record<string, unknown>) => { try { const r = await fetch('/api/forex/agent', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }); const d = await r.json(); if (d.state) setAgentState(d.state); } catch {} }, []);
-
-  const createTrade = async () => {
-    setTradeSubmitting(true);
-    try {
-      const body = { symbol: tradeForm.symbol, direction: tradeForm.direction, lotSize: tradeForm.lotSize, entryPrice: parseFloat(tradeForm.entryPrice) || undefined, stopLoss: parseFloat(tradeForm.stopLoss) || undefined, takeProfit: parseFloat(tradeForm.takeProfit) || undefined, strategy: tradeForm.strategy };
-      const r = await fetch('/api/forex/trades', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (r.ok) { toast({ title: 'Trade Created', description: tradeForm.direction + ' ' + tradeForm.symbol }); setTradeDialogOpen(false); setTradeForm({ symbol: 'EUR/USD', direction: 'BUY', lotSize: 0.1, entryPrice: '', stopLoss: '', takeProfit: '', strategy: 'Manual' }); fetchTrades(); }
-    } catch {}
-    setTradeSubmitting(false);
-  };
-
-  const createAlert = async () => {
-    const price = parseFloat(newAlertPrice); if (!price) return;
-    setAlertSubmitting(true);
-    try { const r = await fetch('/api/forex/alerts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: newAlertSymbol, condition: newAlertCondition, price }) }); if (r.ok) { toast({ title: 'Alert Created', description: newAlertSymbol + ' ' + newAlertCondition + ' ' + price.toFixed(5) }); setNewAlertPrice(''); fetchAlerts(); } } catch {}
-    setAlertSubmitting(false);
-  };
-
-  const deleteAlert = async (id: string) => { try { await fetch('/api/forex/alerts?id=' + id, { method: 'DELETE' }); fetchAlerts(); } catch {} };
-
-  // ==================== MT5 HANDLERS ====================
-  const handleSetBridgeUrl = useCallback(async (url: string) => {
-    // Save to localStorage
-    localStorage.setItem('mt5_bridge_url', url);
-    setMt5BridgeUrl(url);
-    mt5ConnectingRef.current = true;
-    toast({ title: 'MT5 Bridge', description: 'Testing connection...' });
-
-    // Test connection via server-side proxy
-    const ok = await testMT5Connection(url);
-    mt5ConnectingRef.current = false;
-    if (ok) {
-      setMt5Connected(true);
-      toast({ title: 'MT5 Bridge', description: 'Connected! Live data flowing.' });
-      fetchMT5Data(); // Fetch account + positions immediately
-      fetchQuotes();   // Refresh quotes with MT5 data
-    } else {
-      setMt5Connected(false);
-      toast({ title: 'MT5 Bridge', description: 'Connection failed. Check your VPS bridge.', variant: 'destructive' });
-    }
-  }, [testMT5Connection, fetchMT5Data, fetchQuotes, toast]);
-
-  const handleTestBridge = useCallback(async () => {
-    toast({ title: 'MT5 Bridge', description: 'Testing...' });
-    const ok = await testMT5Connection(mt5BridgeUrl || '');
-    if (ok) {
-      setMt5Connected(true);
-      toast({ title: 'MT5 Bridge', description: 'Connection successful!' });
-    } else {
-      setMt5Connected(false);
-      toast({ title: 'MT5 Bridge', description: 'Connection failed', variant: 'destructive' });
-    }
-  }, [testMT5Connection, mt5BridgeUrl, toast]);
-
-  const handleMT5Connect = useCallback((url: string) => {
-    handleSetBridgeUrl(url);
-  }, [handleSetBridgeUrl]);
-
-  const handleMT5Disconnect = useCallback(async () => {
-    // Clear server-side config
-    try {
-      await fetch('/api/forex/mt5/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: null }),
-      });
-    } catch {}
-    localStorage.removeItem('mt5_bridge_url');
-    setMt5BridgeUrl(null);
-    setMt5Connected(false);
-    setMt5Account(null);
-    setMt5Positions([]);
-    toast({ title: 'MT5 Bridge', description: 'Disconnected' });
-  }, [toast]);
-
-  const handleMT5ClosePosition = useCallback(async (ticket: number) => {
-    try {
-      const r = await fetch('/api/forex/mt5/close', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-MT5-Bridge-Url': mt5BridgeUrl || '' },
-        body: JSON.stringify({ ticket }),
-      });
-      const d = await r.json();
-      if (d.success) {
-        toast({ title: 'Position Closed', description: `Ticket #${ticket} · $${(d.profit ?? 0).toFixed(2)}` });
-        fetchMT5Data();
-      } else {
-        toast({ title: 'Close Failed', description: d.error || 'Unknown error', variant: 'destructive' });
-      }
-    } catch {
-      toast({ title: 'Error', description: 'Failed to close position', variant: 'destructive' });
-    }
-  }, [fetchMT5Data, toast]);
-
-  const handleMT5CloseAll = useCallback(async () => {
-    try {
-      const r = await fetch('/api/forex/mt5/close', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-MT5-Bridge-Url': mt5BridgeUrl || '' },
-        body: JSON.stringify({ symbol: 'ALL', type: 'ALL' }),
-      });
-      const d = await r.json();
-      if (d.success) {
-        toast({ title: 'All Positions Closed' });
-        fetchMT5Data();
-      } else {
-        toast({ title: 'Close Failed', description: d.error || 'Unknown error', variant: 'destructive' });
-      }
-    } catch {
-      toast({ title: 'Error', description: 'Failed to close positions', variant: 'destructive' });
-    }
-  }, [fetchMT5Data, toast]);
-
-  // ==================== EFFECTS ====================
-  useEffect(() => { fetchQuotes(); fetchAgentState(); fetchTrades(); }, [fetchQuotes, fetchAgentState, fetchTrades]);
-  useEffect(() => { analyzeSymbol(); }, [selectedSymbol, timeframe, analyzeSymbol]);
-  // AI analysis is ON-DEMAND only (user clicks button) — no auto-fire to avoid rate limits
-  useEffect(() => { const i = setInterval(fetchQuotes, 30000); return () => clearInterval(i); }, [fetchQuotes]);
-  useEffect(() => {
-    if (agentState?.isRunning && agentState.autoTrade) { scanIntervalRef.current = setInterval(runScan, scanInterval * 1000); return () => { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); }; }
-    else { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); }
-  }, [agentState?.isRunning, agentState?.autoTrade, runScan, scanInterval]);
-
-  useEffect(() => {
-    if (activeTab === 'news' && news.length === 0) fetchNews();
-    if (activeTab === 'stats' && !perfStats) fetchPerformance();
-    if (activeTab === 'trades') fetchAlerts();
-  }, [activeTab, news.length, perfStats, fetchNews, fetchPerformance, fetchAlerts]);
-
-  useEffect(() => { if (tradeDialogOpen) { const p = quotes.find(q => q.displaySymbol === tradeForm.symbol)?.price; if (p) setTradeForm(f => ({ ...f, entryPrice: p.toFixed(5) })); } }, [tradeDialogOpen]);
-
-  // ==================== HELPERS ====================
-  const formatPrice = (p: number) => p.toFixed(5);
-  const formatPnL = (p: number | null) => { if (p == null) return '\u2014'; return (+p.toFixed(2) >= 0 ? '+$' : '-$') + Math.abs(p).toFixed(2); };
-  const pnlColor = (p: number | null) => p == null ? 'text-muted-foreground' : p >= 0 ? 'text-emerald-400' : 'text-red-400';
-  const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : quotes.find(q => q.displaySymbol === selectedSymbol)?.price || 0;
-  const currentChange = quotes.find(q => q.displaySymbol === selectedSymbol)?.changePercent || 0;
-  const openTrades = trades.filter(t => t.status === 'OPEN');
-
-  const handleAgentToggle = (key: 'isRunning' | 'autoTrade', value: boolean) => {
-    updateAgent({ [key]: value });
-    if (key === 'isRunning') toast({ title: value ? 'AI Agent Started' : 'AI Agent Stopped', description: value ? 'AI analyzing markets' : 'Agent paused' });
-    else toast({ title: value ? 'Auto-Trade Enabled' : 'Auto-Trade Disabled' });
-  };
-
-  // ==================== RENDER ====================
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <audio ref={audioRef} className="hidden" />
-      <SettingsDialog
-        open={showSettings} onOpenChange={setShowSettings}
-        strategiesEnabled={strategiesEnabled} setStrategiesEnabled={setStrategiesEnabled}
-        scanInterval={scanInterval} setScanInterval={setScanInterval}
-        defaultLotSize={defaultLotSize} setDefaultLotSize={setDefaultLotSize}
-        maxConcurrent={maxConcurrent} setMaxConcurrent={setMaxConcurrent}
-        updateAgent={updateAgent}
-        mt5BridgeUrl={mt5BridgeUrl} mt5Connected={mt5Connected}
-        onSetBridgeUrl={handleSetBridgeUrl} onTestBridge={handleTestBridge}
-        onOpenWizard={() => setShowWizard(true)}
-      />
-      <NewTradeDialog open={tradeDialogOpen} onOpenChange={setTradeDialogOpen} form={tradeForm} setForm={setTradeForm} submitting={tradeSubmitting} onSubmit={createTrade} quotes={quotes} />
-      <MT5SetupWizard open={showWizard} onOpenChange={setShowWizard} onComplete={(url) => { handleSetBridgeUrl(url); setShowWizard(false); toast({ title: 'MT5 Connected!', description: 'Live data is now flowing' }); }} />
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`rounded-xl border p-4 transition-colors ${directionBg(signal.direction)}`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-bold text-white tracking-wide">{signal.symbol}</span>
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+            signal.direction === 'BUY'
+              ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+              : signal.direction === 'SELL'
+              ? 'border-rose-500/50 bg-rose-500/15 text-rose-300'
+              : 'border-slate-600 bg-slate-700/40 text-slate-400'
+          }`}>
+            {signal.direction === 'BUY' ? '▲ BUY' : signal.direction === 'SELL' ? '▼ SELL' : '— HOLD'}
+          </span>
+          {signal.executed && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 border border-violet-500/30 text-violet-300">EXECUTED</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-slate-500">{signal.timeframe}</span>
+          <span className="text-xs text-slate-600">{timeAgo(signal.createdAt)}</span>
+        </div>
+      </div>
 
-      {/* HEADER */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-50">
-        <div className="flex items-center justify-between px-3 py-2">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-2"><Activity className="w-5 h-5 text-emerald-400" /><span className="font-bold text-base sm:text-lg tracking-tight">TRADING AGENT</span></div>
-            {agentState?.isRunning ? <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-glow" />LIVE</Badge> : <Badge variant="secondary" className="gap-1"><span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />STOPPED</Badge>}
-            {agentState?.autoTrade && <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 gap-1">AUTO</Badge>}
+      {/* Confidence bar */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="flex-1 h-1.5 bg-slate-700/70 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${confidenceBar(signal.confidence)}`}
+            style={{ width: `${signal.confidence}%` }}
+          />
+        </div>
+        <span className="text-xs font-semibold text-slate-300 w-8 text-right">{Math.round(signal.confidence)}%</span>
+        {rr !== null && (
+          <span className="text-xs text-slate-500 w-16 text-right">R:R {Number(rr).toFixed(2)}</span>
+        )}
+      </div>
+
+      {/* Price levels */}
+      {signal.direction !== 'HOLD' && (
+        <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
+          {[
+            { label: 'Entry', value: formatPrice(signal.entryPrice, signal.symbol), color: 'text-white' },
+            { label: 'SL', value: formatPrice(signal.stopLoss, signal.symbol), color: 'text-rose-400' },
+            { label: 'TP', value: formatPrice(signal.takeProfit, signal.symbol), color: 'text-emerald-400' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="bg-slate-900/60 rounded-lg p-2 text-center">
+              <div className="text-slate-500 text-[10px] mb-0.5">{label}</div>
+              <div className={`font-mono font-semibold ${color}`}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Reasoning */}
+      {reasoning && (
+        <div>
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors w-full text-left"
+          >
+            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            <span className={expanded ? '' : 'truncate'}>
+              {expanded ? 'Hide reasoning' : reasoning.slice(0, 90) + (reasoning.length > 90 ? '…' : '')}
+            </span>
+          </button>
+          <AnimatePresence>
+            {expanded && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <p className="mt-2 text-xs text-slate-400 leading-relaxed bg-slate-900/60 rounded-lg p-3 border border-slate-700/40">
+                  {reasoning}
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ─── TradeRow ─────────────────────────────────────────────────────────────────
+
+function TradeRow({ trade }: { trade: Trade }) {
+  const isOpen = trade.status === 'OPEN';
+  return (
+    <div className="flex items-center gap-2 py-2 border-b border-slate-800 last:border-0 text-xs">
+      <div className={`w-1 h-6 rounded-full shrink-0 ${trade.direction === 'BUY' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="font-semibold text-white">{trade.symbol}</span>
+          <span className={`text-[10px] font-bold ${trade.direction === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>{trade.direction}</span>
+          <span className="text-slate-600 text-[10px]">{trade.lotSize} lot</span>
+        </div>
+        <div className="text-slate-500 text-[10px] font-mono">
+          {formatPrice(trade.entryPrice, trade.symbol)}
+          {trade.exitPrice ? ` → ${formatPrice(trade.exitPrice, trade.symbol)}` : ''}
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        {isOpen ? (
+          <span className="text-sky-400 font-semibold">OPEN</span>
+        ) : (
+          <span className={`font-bold ${pnlColor(trade.pnl)}`}>
+            {trade.pnl !== null ? `${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}` : '—'}
+          </span>
+        )}
+        <div className="text-slate-600 text-[10px]">{timeAgo(trade.openTime)}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AuditRow ─────────────────────────────────────────────────────────────────
+
+function AuditRow({ log }: { log: AuditLog }) {
+  let details: Record<string, unknown> = {};
+  try { details = JSON.parse(log.details || '{}'); } catch { /* skip */ }
+  const summary = String(details.summary ?? details.message ?? details.reason ?? '');
+
+  return (
+    <div className="flex items-start gap-2 py-2 border-b border-slate-800/70 last:border-0">
+      <div className="mt-0.5">{actionIcon(log.action)}</div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide">
+            {log.action.replace(/_/g, ' ')}
+          </span>
+          {log.symbol && <span className="text-[10px] text-slate-500">{log.symbol}</span>}
+        </div>
+        {summary && (
+          <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed truncate">{summary}</p>
+        )}
+      </div>
+      <span className="text-[10px] text-slate-600 shrink-0 mt-0.5">{timeAgo(log.createdAt)}</span>
+    </div>
+  );
+}
+
+// ─── Toggle ───────────────────────────────────────────────────────────────────
+
+function Toggle({ on, onChange, color = 'emerald' }: { on: boolean; onChange: () => void; color?: string }) {
+  const bg = on ? (color === 'amber' ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-slate-700';
+  return (
+    <button onClick={onChange} className={`relative w-10 h-5 rounded-full transition-colors ${bg}`}>
+      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-5' : 'left-0.5'}`} />
+    </button>
+  );
+}
+
+// ─── Countdown hook ────────────────────────────────────────────────────────────
+
+function useCountdown(lastScanAt: string | null, intervalMinutes = 15): string {
+  const [display, setDisplay] = useState('—');
+  useEffect(() => {
+    const tick = () => {
+      if (!lastScanAt) { setDisplay('—'); return; }
+      const next = new Date(lastScanAt).getTime() + intervalMinutes * 60 * 1000;
+      const remaining = Math.max(0, next - Date.now());
+      if (remaining === 0) { setDisplay('Now'); return; }
+      const m = Math.floor(remaining / 60000);
+      const s = Math.floor((remaining % 60000) / 1000);
+      setDisplay(`${m}:${s.toString().padStart(2, '0')}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lastScanAt, intervalMinutes]);
+  return display;
+}
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
+
+export default function Dashboard() {
+  const [agent, setAgent] = useState<AgentState | null>(null);
+  const [signals, setSignals] = useState<Signal[]>([]);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [audit, setAudit] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const _lastRefresh = useRef(Date.now());
+
+  const countdown = useCountdown(agent?.lastScanAt ?? null);
+
+  const fetchAll = useCallback(async (silent = false) => {
+    if (!silent) setRefreshing(true);
+    try {
+      const [agentRes, sigRes, tradeRes, auditRes] = await Promise.allSettled([
+        fetch('/api/forex/agent').then(r => r.json()),
+        fetch('/api/forex/db-signals').then(r => r.json()),
+        fetch('/api/forex/trades').then(r => r.json()),
+        fetch('/api/forex/audit').then(r => r.json()),
+      ]);
+      if (agentRes.status === 'fulfilled' && agentRes.value?.state) setAgent(agentRes.value.state);
+      if (sigRes.status === 'fulfilled' && sigRes.value?.signals) setSignals(sigRes.value.signals);
+      if (tradeRes.status === 'fulfilled' && tradeRes.value?.trades) setTrades(tradeRes.value.trades);
+      if (auditRes.status === 'fulfilled' && auditRes.value?.logs) setAudit(auditRes.value.logs);
+      _lastRefresh.current = Date.now();
+    } finally {
+      setLoading(false);
+      if (!silent) setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAll();
+    const id = setInterval(() => fetchAll(true), 10000);
+    return () => clearInterval(id);
+  }, [fetchAll]);
+
+  const toggleAgent = async () => {
+    if (!agent || toggling) return;
+    setToggling(true);
+    try {
+      const res = await fetch('/api/forex/agent', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isRunning: !agent.isRunning }),
+      });
+      if (res.ok) setAgent((await res.json()).state);
+    } finally { setToggling(false); }
+  };
+
+  const toggleAutoTrade = async () => {
+    if (!agent) return;
+    const res = await fetch('/api/forex/agent', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoTrade: !agent.autoTrade }),
+    });
+    if (res.ok) setAgent((await res.json()).state);
+  };
+
+  const openTrades = trades.filter(t => t.status === 'OPEN');
+  const closedTrades = trades.filter(t => t.status === 'CLOSED').slice(0, 5);
+  const todayPnl = trades
+    .filter(t => t.status === 'CLOSED' && t.closeTime && new Date(t.closeTime) > new Date(Date.now() - 86400000))
+    .reduce((s, t) => s + (t.pnl ?? 0), 0);
+
+  const watchList = agent?.watchSymbols?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-slate-400">
+          <RefreshCw size={20} className="animate-spin" />
+          <span className="text-sm">Connecting to trading database…</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+
+      {/* ── Header ── */}
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm sticky top-0 z-20">
+        <div className="max-w-screen-2xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+
+          <div className="flex items-center gap-3">
+            <Bot size={20} className="text-violet-400" />
+            <span className="font-bold text-white tracking-tight text-sm">AI Trading Agent</span>
+            <div className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+              agent?.isRunning
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-slate-800 border-slate-700 text-slate-500'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${agent?.isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+              {agent?.isRunning ? 'LIVE' : 'IDLE'}
+            </div>
+            <div className={`hidden sm:flex items-center gap-1 text-xs ${agent?.mt5Connected ? 'text-emerald-400/70' : 'text-slate-600'}`}>
+              {agent?.mt5Connected ? <Wifi size={12} /> : <WifiOff size={12} />}
+              <span>MT5</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1 sm:gap-2">
-            <Tooltip><TooltipTrigger asChild><Button variant={soundEnabled ? 'default' : 'ghost'} size="sm" className="h-8 w-8 p-0" onClick={() => setSoundEnabled(!soundEnabled)}>{soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}</Button></TooltipTrigger><TooltipContent>{soundEnabled ? 'Sound On' : 'Sound Off'}</TooltipContent></Tooltip>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setShowSettings(true)}><Settings className="w-4 h-4" /></Button>
-            <div className={cn('flex items-center gap-1.5 text-xs', mt5Connected ? 'text-emerald-400' : 'text-red-400')}>{mt5Connected ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}<span className="hidden sm:inline">MT5</span></div>
+
+          <div className="hidden md:flex items-center gap-6 text-sm">
+            <div className="flex items-center gap-1.5">
+              <DollarSign size={14} className="text-slate-500" />
+              <span className="text-white font-semibold">${(agent?.balance ?? 0).toLocaleString('en', { minimumFractionDigits: 2 })}</span>
+              <span className="text-slate-500 text-xs">{agent?.currency ?? 'USD'}</span>
+            </div>
+            <div className={`flex items-center gap-1.5 font-semibold ${todayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {todayPnl >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+              <span>{todayPnl >= 0 ? '+' : ''}${todayPnl.toFixed(2)} today</span>
+            </div>
+            {agent?.isRunning && (
+              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                <Clock size={12} />
+                next scan <span className="text-slate-300 font-mono">{countdown}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => fetchAll(false)}
+              disabled={refreshing}
+              className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+            <button
+              onClick={toggleAgent}
+              disabled={toggling}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                agent?.isRunning
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
+                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+              }`}
+            >
+              {toggling ? '…' : agent?.isRunning ? 'Stop Agent' : 'Start Agent'}
+            </button>
           </div>
         </div>
-        <TickerStrip quotes={quotes} selectedSymbol={selectedSymbol} onSelect={setSelectedSymbol} formatPrice={formatPrice} dataSource={dataSource} />
       </header>
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col lg:flex-row gap-0 overflow-hidden">
-        {/* LEFT: Chart + Analysis */}
-        <div className="flex-1 flex flex-col min-w-0 lg:border-r border-b lg:border-b-0 border-border">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-card/30">
-            <span className="font-semibold text-sm">{selectedSymbol}</span>
-            <div className="flex items-center gap-1 ml-2">{TIMEFRAMES.map(tf => <button key={tf} onClick={() => setTimeframe(tf)} className={cn('px-2 py-0.5 rounded text-xs font-mono transition-all', timeframe === tf ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted')}>{tf}</button>)}</div>
-            <div className="ml-auto flex items-center gap-2">
-              {isAnalyzing && <span className="animate-spin text-muted-foreground">⟳</span>}
-              <span className={cn('text-xl sm:text-2xl font-bold font-mono', currentChange >= 0 ? 'text-emerald-400' : 'text-red-400')}>{formatPrice(currentPrice)}</span>
+      {/* ── Grid ── */}
+      <div className="max-w-screen-2xl mx-auto px-4 py-5 grid grid-cols-1 lg:grid-cols-[260px_1fr_290px] gap-5 items-start">
+
+        {/* ── Left ── */}
+        <div className="space-y-4">
+
+          {/* Agent controls */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <Activity size={13} className="text-slate-500" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Agent Controls</span>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-slate-300">
+                  <span className={`w-2 h-2 rounded-full ${agent?.isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                  Running
+                </div>
+                <Toggle on={agent?.isRunning ?? false} onChange={toggleAgent} />
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-slate-300">
+                  <Zap size={13} className={agent?.autoTrade ? 'text-amber-400' : 'text-slate-600'} />
+                  Auto-Trade
+                </div>
+                <Toggle on={agent?.autoTrade ?? false} onChange={toggleAutoTrade} color="amber" />
+              </div>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-slate-800 space-y-2.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Last scan</span>
+                <span className="text-slate-300 font-mono">{agent?.lastScanAt ? timeAgo(agent.lastScanAt) : '—'}</span>
+              </div>
+              {agent?.isRunning && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Next scan</span>
+                  <span className="text-slate-300 font-mono">{countdown}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-500">Max risk / trade</span>
+                <span className="text-slate-300">{agent?.maxRiskPercent ?? 2}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Open positions</span>
+                <span className={openTrades.length > 0 ? 'text-sky-400 font-semibold' : 'text-slate-400'}>
+                  {openTrades.length}
+                </span>
+              </div>
             </div>
           </div>
-          <div className="flex-1 p-2 sm:p-3 min-h-[300px] sm:min-h-[350px]"><CandlestickChart candles={candles} indicators={indicators} /></div>
 
-          {/* Signal Analysis */}
-          <div className="border-t border-border px-3 py-3 bg-card/30">
-            <SignalAnalysis selectedSymbol={selectedSymbol} timeframe={timeframe} signalResults={signalResults} combinedSignal={combinedSignal} aiAnalysis={aiAnalysis} isAIAnalyzing={isAIAnalyzing} aiCooldown={aiCooldown} formatPrice={formatPrice} onAnalyzeAI={() => analyzeSymbolWithAI(selectedSymbol, timeframe)} />
-            <PriceAlerts alerts={alerts} open={alertsOpen} setOpen={setAlertsOpen} newAlert={{ symbol: newAlertSymbol, setSymbol: setNewAlertSymbol, condition: newAlertCondition, setCondition: setNewAlertCondition, price: newAlertPrice, setPrice: setNewAlertPrice, submitting: alertSubmitting, onSubmit: createAlert }} onDelete={deleteAlert} onNewTrade={() => setTradeDialogOpen(true)} />
+          {/* Account */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <BarChart2 size={13} className="text-slate-500" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Account</span>
+            </div>
+            <div className="text-3xl font-bold text-white tracking-tight">
+              ${(agent?.balance ?? 0).toLocaleString('en', { minimumFractionDigits: 2 })}
+            </div>
+            <div className="text-xs text-slate-600 mb-4">{agent?.currency ?? 'USD'} balance</div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Today P&amp;L</span>
+                <span className={`font-semibold ${todayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {todayPnl >= 0 ? '+' : ''}${todayPnl.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Total closed</span>
+                <span className="text-slate-300">{trades.filter(t => t.status === 'CLOSED').length} trades</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Watch list */}
+          {watchList.length > 0 && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Shield size={13} className="text-slate-500" />
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Watch List</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {watchList.map(sym => {
+                  const clean = sym.replace('=X', '');
+                  const sig = signals.find(s =>
+                    s.symbol === sym ||
+                    s.symbol === clean ||
+                    s.symbol.replace('/', '') === clean
+                  );
+                  const dir = sig?.direction;
+                  return (
+                    <span key={sym} className={`text-xs px-2.5 py-1 rounded-lg border font-mono font-semibold ${
+                      dir === 'BUY' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : dir === 'SELL' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                      : 'bg-slate-800 border-slate-700 text-slate-400'
+                    }`}>
+                      {clean}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Middle: Signals ── */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Zap size={15} className="text-amber-400" />
+              <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Latest Signals</h2>
+              <span className="text-xs text-slate-600 bg-slate-800 px-2 py-0.5 rounded-full">{signals.length}</span>
+            </div>
+            {signals[0] && (
+              <span className="text-xs text-slate-600">Updated {timeAgo(signals[0].createdAt)}</span>
+            )}
+          </div>
+
+          {signals.length === 0 ? (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
+              <Bot size={28} className="text-slate-700 mx-auto mb-3" />
+              <p className="text-slate-500 text-sm">No signals yet</p>
+              <p className="text-slate-700 text-xs mt-1">
+                {agent?.isRunning ? 'Agent is scanning — signals appear here after each cycle' : 'Start the agent to begin scanning markets'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <AnimatePresence>
+                {signals.map(sig => <SignalCard key={sig.id} signal={sig} />)}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
+
+        {/* ── Right: Trades + Audit ── */}
+        <div className="space-y-4">
+
+          {/* Open positions */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <TrendingUp size={13} className="text-sky-400" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Open Positions</span>
+              {openTrades.length > 0 && (
+                <span className="ml-auto text-xs font-bold text-sky-400 bg-sky-400/10 border border-sky-400/20 px-1.5 py-0.5 rounded-full">
+                  {openTrades.length}
+                </span>
+              )}
+            </div>
+            {openTrades.length === 0 ? (
+              <div className="py-6 text-center">
+                <CheckCircle2 size={18} className="text-slate-700 mx-auto mb-1.5" />
+                <p className="text-xs text-slate-600">No open positions</p>
+              </div>
+            ) : (
+              openTrades.map(t => <TradeRow key={t.id} trade={t} />)
+            )}
+          </div>
+
+          {/* Recent closed */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <BarChart2 size={13} className="text-slate-500" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Recent Closed</span>
+            </div>
+            {closedTrades.length === 0 ? (
+              <div className="py-6 text-center">
+                <Minus size={18} className="text-slate-700 mx-auto mb-1.5" />
+                <p className="text-xs text-slate-600">No closed trades yet</p>
+              </div>
+            ) : (
+              closedTrades.map(t => <TradeRow key={t.id} trade={t} />)
+            )}
+          </div>
+
+          {/* Audit log */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertCircle size={13} className="text-slate-500" />
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Audit Log</span>
+              <span className="ml-auto text-xs text-slate-600">{audit.length}</span>
+            </div>
+            {audit.length === 0 ? (
+              <div className="py-6 text-center">
+                <Circle size={18} className="text-slate-700 mx-auto mb-1.5" />
+                <p className="text-xs text-slate-600">No activity yet</p>
+              </div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto">
+                {audit.map(log => <AuditRow key={log.id} log={log} />)}
+              </div>
+            )}
           </div>
         </div>
+      </div>
 
-        {/* RIGHT: Tabs Panel */}
-        <div className="w-full lg:w-[400px] flex flex-col border-t lg:border-t-0 border-border overflow-hidden">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-            <div className="flex items-center gap-1 px-2 pt-2 border-b border-border bg-card/30 overflow-x-auto">
-              <TabsList className="bg-transparent h-auto p-0 gap-0">{[
-                { v: 'trades', l: 'Trades' }, { v: 'agent', l: 'Agent' }, { v: 'mt5', l: 'MT5' }, { v: 'news', l: 'News' }, { v: 'stats', l: 'Stats' }, { v: 'log', l: 'Log' },
-              ].map(t => <TabsTrigger key={t.v} value={t.v} className="text-xs px-3 py-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">{t.l}</TabsTrigger>)}</TabsList>
-            </div>
-            <TabsContent value="trades" className="flex-1 m-0 overflow-y-auto"><TradesTab trades={trades} openTrades={openTrades} formatPrice={formatPrice} formatPnL={formatPnL} pnlColor={pnlColor} tradeStats={tradeStats} onNewTrade={() => setTradeDialogOpen(true)} /></TabsContent>
-            <TabsContent value="agent" className="flex-1 m-0"><AgentTab agentState={agentState} openTrades={openTrades} maxConcurrent={maxConcurrent} isScanning={isScanning} onAgentToggle={handleAgentToggle} onUpdateAgent={updateAgent} onScan={runScan} /></TabsContent>
-            <TabsContent value="mt5" className="flex-1 m-0 overflow-y-auto">
-              <MT5Tab
-                connected={mt5Connected}
-                account={mt5Account}
-                positions={mt5Positions}
-                onConnect={handleMT5Connect}
-                onDisconnect={handleMT5Disconnect}
-                onClosePosition={handleMT5ClosePosition}
-                onCloseAll={handleMT5CloseAll}
-                onRefresh={fetchMT5Data}
-                onOpenWizard={() => setShowWizard(true)}
-              />
-            </TabsContent>
-            <TabsContent value="news" className="flex-1 m-0 overflow-y-auto"><NewsTab news={news} loading={newsLoading} onRefresh={fetchNews} /></TabsContent>
-            <TabsContent value="stats" className="flex-1 m-0 overflow-y-auto"><StatsTab stats={perfStats} loading={perfLoading} onRefresh={fetchPerformance} /></TabsContent>
-            <TabsContent value="log" className="flex-1 m-0 overflow-y-auto"><ScanLog log={scanLog} /></TabsContent>
-          </Tabs>
-        </div>
-      </main>
-      <Footer />
+      {/* ── Footer ── */}
+      <footer className="border-t border-slate-800/50 mt-8 py-4 text-center text-xs text-slate-700">
+        AI Trading Agent · Powered by Claude claude-sonnet-4-6 · Refreshes every 10s
+      </footer>
     </div>
   );
 }
