@@ -123,9 +123,10 @@ export default function TradingTerminal() {
   const fetchMT5Data = useCallback(async () => {
     if (!mt5BridgeUrl) return;
     try {
+      const headers = { 'X-MT5-Bridge-Url': mt5BridgeUrl };
       const [accRes, posRes] = await Promise.allSettled([
-        fetch('/api/forex/mt5/account'),
-        fetch('/api/forex/mt5/positions'),
+        fetch('/api/forex/mt5/account', { headers }),
+        fetch('/api/forex/mt5/positions', { headers }),
       ]);
       if (accRes.status === 'fulfilled' && accRes.value.ok) {
         const accData = await accRes.value.json();
@@ -316,7 +317,7 @@ export default function TradingTerminal() {
     try {
       const r = await fetch('/api/forex/mt5/close', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-MT5-Bridge-Url': mt5BridgeUrl || '' },
         body: JSON.stringify({ ticket }),
       });
       const d = await r.json();
@@ -335,7 +336,7 @@ export default function TradingTerminal() {
     try {
       const r = await fetch('/api/forex/mt5/close', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-MT5-Bridge-Url': mt5BridgeUrl || '' },
         body: JSON.stringify({ symbol: 'ALL', type: 'ALL' }),
       });
       const d = await r.json();

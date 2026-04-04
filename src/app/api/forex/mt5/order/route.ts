@@ -1,9 +1,10 @@
 // MT5 Order API — Proxy to bridge /api/mt5/order
 import { NextResponse } from 'next/server';
-import { getBridgeUrl, sendMT5Order } from '@/lib/mt5-provider';
+import { getEffectiveBridgeUrl, sendMT5Order } from '@/lib/mt5-provider';
 
 export async function POST(req: Request) {
-  if (!getBridgeUrl()) {
+  const url = getEffectiveBridgeUrl(req);
+  if (!url) {
     return NextResponse.json(
       { error: 'MT5 bridge not configured' },
       { status: 502 }
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
       tp: body.tp ?? 0,
       comment: body.comment,
       magic: body.magic,
-    });
+    }, url);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

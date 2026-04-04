@@ -1,9 +1,10 @@
 // MT5 Close API — Proxy to bridge /api/mt5/close
 import { NextResponse } from 'next/server';
-import { getBridgeUrl, closeMT5Position } from '@/lib/mt5-provider';
+import { getEffectiveBridgeUrl, closeMT5Position } from '@/lib/mt5-provider';
 
 export async function POST(req: Request) {
-  if (!getBridgeUrl()) {
+  const url = getEffectiveBridgeUrl(req);
+  if (!url) {
     return NextResponse.json(
       { error: 'MT5 bridge not configured' },
       { status: 502 }
@@ -19,7 +20,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const result = await closeMT5Position(ticket, symbol);
+    const result = await closeMT5Position(ticket, symbol, url);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

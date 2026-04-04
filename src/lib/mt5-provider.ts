@@ -105,6 +105,25 @@ export function getBridgeUrl(): string | null {
   return bridgeUrl;
 }
 
+/** Extract bridge URL from request header (fallback for hot-reload resilience) */
+export function getBridgeUrlFromRequest(req: Request): string | null {
+  // Check for custom header sent by the client
+  const headerUrl = req.headers.get('x-mt5-bridge-url');
+  if (headerUrl && (headerUrl.startsWith('http://') || headerUrl.startsWith('https://'))) {
+    // Also save it to in-memory store so subsequent requests work
+    if (headerUrl !== bridgeUrl) {
+      bridgeUrl = headerUrl;
+    }
+    return headerUrl;
+  }
+  return bridgeUrl;
+}
+
+/** Get effective bridge URL — checks request header first, then in-memory */
+export function getEffectiveBridgeUrl(req: Request): string | null {
+  return getBridgeUrlFromRequest(req) || bridgeUrl;
+}
+
 // ==================== SYMBOL MAPPING ====================
 
 // Convert our display format (e.g. "EUR/USD") to MT5 format (e.g. "EURUSD")
@@ -144,13 +163,15 @@ const TIMEFRAME_TO_BRIDGE: Record<string, string> = {
 
 // ==================== CORE FUNCTIONS ====================
 
-async function proxyToBridge<T>(path: string, options?: RequestInit): Promise<T | null> {
-  if (!bridgeUrl) return null;
+async function proxyToBridge<T>(path: string, explicitUrl?: string | null, options?: RequestInit): Promise<T | null> {
+  const url = explicitUrl || bridgeUrl;
+  if (!url) return null;
   try {
-    const url = `${bridgeUrl.replace(/\/+$/, '')}/api/mt5${path}`;
+    const baseUrl = url.replace(/\/+$/, '');
+    const fetchUrl = `${baseUrl}/api/mt5${path}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(fetchUrl, { ...options, signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) {
       console.error(`[MT5] Bridge returned ${res.status} for ${path}`);
@@ -251,15 +272,16 @@ export async function fetchMT5History(from: number, to: number): Promise<MT5Deal
   return data?.deals ?? null;
 }
 
-export async function sendMT5Order(order: MT5OrderRequest): Promise<MT5OrderResult> {
-  if (!bridgeUrl) {
+export async function sendMT5Order(order: MT5OrderRequest, explicitUrl?: string | null): Promise<MT5OrderResult> {
+  const url = explicitUrl || bridgeUrl;
+  if (!url) {
     return { success: false, error: 'MT5 bridge not configured' };
   }
   try {
-    const url = `${bridgeUrl.replace(/\/+$/, '')}/api/mt5/order`;
+    const orderUrl = `${url.replace(/\/+$/, '')}/api/mt5/order`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000); // 15s for orders
-    const res = await fetch(url, {
+    const res = await fetch(orderUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(order),
@@ -272,16 +294,17 @@ export async function sendMT5Order(order: MT5OrderRequest): Promise<MT5OrderResu
   }
 }
 
-export async function closeMT5Position(ticket?: number, symbol?: string): Promise<MT5CloseResult> {
-  if (!bridgeUrl) {
+export async function closeMT5Position(ticket?: number, symbol?: string, explicitUrl?: string | null): Promise<MT5CloseResult> {
+  const url = explicitUrl || bridgeUrl;
+  if (!url) {
     return { success: false, error: 'MT5 bridge not configured' };
   }
   try {
-    const url = `${bridgeUrl.replace(/\/+$/, '')}/api/mt5/close`;
+    const closeUrl = `${url.replace(/\/+$/, '')}/api/mt5/close`;
     const body = ticket ? { ticket } : symbol ? { symbol, type: 'ALL' } : {};
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-    const res = await fetch(url, {
+    const res = await fetch(closeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
