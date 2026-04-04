@@ -84,3 +84,14 @@ model Setting {
   value String
   updatedAt DateTime @updatedAt
 }
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  symbol    String?
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([symbol])
+  @@index([createdAt])
+}

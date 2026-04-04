@@ -1,0 +1,22 @@
+[Unit]
+Description=AI Trading Agent (Multi-Timeframe, Claude-powered)
+Documentation=https://github.com/Siddikuk/Trading-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/user/Trading-agent/vps-agent
+EnvironmentFile=/home/user/Trading-agent/vps-agent/.env
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=30
+# Give the agent up to 60s to finish current cycle on shutdown
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trading-agent
+
+[Install]
+WantedBy=multi-user.target
