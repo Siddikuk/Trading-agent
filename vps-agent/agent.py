@@ -19,7 +19,7 @@ from config import (
 )
 from database import (
     get_agent_state, update_agent_state,
-    create_trade, create_signal, create_audit_log,
+    create_trade, create_signal, update_signal, create_audit_log,
     get_open_trades,
 )
 from mt5_client import (
@@ -297,21 +297,9 @@ async def run_cycle() -> dict:
                        f"MT5 ticket={ticket}"),
             )
 
-            # Update signal as executed
+            # Mark existing signal as executed (avoid duplicate DB row)
             if sig_id:
-                create_signal(
-                    symbol=sym,
-                    direction=decision.direction,
-                    confidence=decision.confidence,
-                    entry_price=fill_price,
-                    stop_loss=decision.stop_loss,
-                    take_profit=decision.take_profit,
-                    strategy="AI-MTF",
-                    timeframe=timeframe,
-                    indicators=indicators_snapshot,
-                    executed=True,
-                    trade_id=trade_id,
-                )
+                update_signal(sig_id, executed=True, trade_id=trade_id)
 
             create_audit_log("TRADE_OPENED", sym, {
                 "trade_id":  trade_id,

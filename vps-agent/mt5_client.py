@@ -16,6 +16,7 @@ from config import (
     MT5_BRIDGE_URL,
     BRIDGE_TIMEOUT_S,
     ORDER_TIMEOUT_S,
+    BRIDGE_RETRY_LIMIT,
     TIMEFRAMES,
     TF_CANDLE_COUNT,
     to_mt5_symbol,
@@ -35,20 +36,32 @@ async def _get(
     params: dict | None = None,
     timeout: int = BRIDGE_TIMEOUT_S,
 ) -> Any:
+    """GET with exponential-backoff retry (read-only — safe to retry)."""
     url = f"{MT5_BRIDGE_URL}{path}"
-    try:
-        async with session.get(
-            url, params=params,
-            timeout=aiohttp.ClientTimeout(total=timeout)
-        ) as resp:
-            resp.raise_for_status()
-            return await resp.json()
-    except aiohttp.ClientResponseError as e:
-        logger.error("Bridge GET %s → HTTP %s: %s", path, e.status, e.message)
-        raise
-    except asyncio.TimeoutError:
-        logger.error("Bridge GET %s timed out after %ds", path, timeout)
-        raise
+    last_exc: Exception = RuntimeError("No attempts made")
+    for attempt in range(BRIDGE_RETRY_LIMIT):
+        try:
+            async with session.get(
+                url, params=params,
+                timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+        except aiohttp.ClientResponseError as e:
+            logger.error("Bridge GET %s → HTTP %s: %s", path, e.status, e.message)
+            raise  # HTTP errors (4xx/5xx) are not transient — don't retry
+        except (asyncio.TimeoutError, aiohttp.ClientConnectionError) as e:
+            last_exc = e
+            if attempt < BRIDGE_RETRY_LIMIT - 1:
+                wait = 2 ** attempt   # 1s, 2s, 4s …
+                logger.warning(
+                    "Bridge GET %s failed (attempt %d/%d), retrying in %ds: %s",
+                    path, attempt + 1, BRIDGE_RETRY_LIMIT, wait, e,
+                )
+                await asyncio.sleep(wait)
+            else:
+                logger.error("Bridge GET %s timed out after %d attempts", path, BRIDGE_RETRY_LIMIT)
+    raise last_exc
 
 
 async def _post(
@@ -84,11 +97,44 @@ async def ping_bridge() -> bool:
 
 # ─── Account & positions ──────────────────────────────────────────────────────
 
+def _validate_account(data: Any) -> Optional[dict]:
+    """Validate bridge account response. Returns dict or None."""
+    if not isinstance(data, dict):
+        logger.error("Bridge account response is not a dict: %r", data)
+        return None
+    required = ("balance", "equity")
+    if not all(k in data for k in required):
+        logger.error("Bridge account response missing fields %s: %r", required, data)
+        return None
+    return data
+
+
+def _validate_positions(data: Any) -> list[dict]:
+    """Validate bridge positions response. Returns list (empty on invalid)."""
+    if not isinstance(data, dict):
+        logger.error("Bridge positions response is not a dict: %r", data)
+        return []
+    raw = data.get("positions", [])
+    if not isinstance(raw, list):
+        logger.error("Bridge positions field is not a list: %r", raw)
+        return []
+    valid: list[dict] = []
+    for pos in raw:
+        if not isinstance(pos, dict):
+            continue
+        if "ticket" not in pos or "symbol" not in pos:
+            logger.warning("Position missing ticket/symbol, skipping: %r", pos)
+            continue
+        valid.append(pos)
+    return valid
+
+
 async def fetch_account() -> Optional[dict]:
     """Return account info dict (balance, equity, margin, etc.) or None."""
     try:
         async with aiohttp.ClientSession() as session:
-            return await _get(session, "/api/mt5/account")
+            data = await _get(session, "/api/mt5/account")
+            return _validate_account(data)
     except Exception as e:
         logger.error("fetch_account failed: %s", e)
         return None
@@ -99,7 +145,7 @@ async def fetch_positions() -> list[dict]:
     try:
         async with aiohttp.ClientSession() as session:
             data = await _get(session, "/api/mt5/positions")
-            return data.get("positions", [])
+            return _validate_positions(data)
     except Exception as e:
         logger.error("fetch_positions failed: %s", e)
         return []
@@ -112,9 +158,15 @@ async def fetch_account_and_positions() -> tuple[Optional[dict], list[dict]]:
         positions_task = asyncio.create_task(_get(session, "/api/mt5/positions"))
         results = await asyncio.gather(account_task, positions_task, return_exceptions=True)
 
-    account   = results[0] if not isinstance(results[0], Exception) else None
-    pos_data  = results[1] if not isinstance(results[1], Exception) else {}
-    positions = pos_data.get("positions", []) if isinstance(pos_data, dict) else []
+    raw_account  = results[0] if not isinstance(results[0], Exception) else None
+    raw_pos_data = results[1] if not isinstance(results[1], Exception) else None
+    if isinstance(results[0], Exception):
+        logger.error("fetch_account_and_positions account error: %s", results[0])
+    if isinstance(results[1], Exception):
+        logger.error("fetch_account_and_positions positions error: %s", results[1])
+
+    account   = _validate_account(raw_account) if raw_account is not None else None
+    positions = _validate_positions(raw_pos_data) if raw_pos_data is not None else []
     return account, positions
 
 

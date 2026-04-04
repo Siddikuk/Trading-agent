@@ -6,7 +6,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+# SECURITY: run as a dedicated low-privilege user, NOT root.
+# Before first deploy: useradd -r -s /bin/false -d /home/trading trading
+#                      chown -R trading:trading /home/user/Trading-agent/vps-agent
+User=trading
 WorkingDirectory=/home/user/Trading-agent/vps-agent
 EnvironmentFile=/home/user/Trading-agent/vps-agent/.env
 ExecStart=/usr/bin/python3 main.py

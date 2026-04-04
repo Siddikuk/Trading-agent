@@ -40,6 +40,15 @@ def _get_pool() -> pg_pool.ThreadedConnectionPool:
     return _pool
 
 
+def close_pool() -> None:
+    """Close all pooled connections — call on process shutdown."""
+    global _pool
+    if _pool is not None:
+        _pool.closeall()
+        _pool = None
+        logger.info("DB connection pool closed")
+
+
 @contextmanager
 def _conn():
     p = _get_pool()
@@ -47,8 +56,9 @@ def _conn():
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except Exception as exc:
         conn.rollback()
+        logger.error("DB error (rolled back): %s", exc)
         raise
     finally:
         p.putconn(conn)
@@ -238,6 +248,17 @@ def create_signal(
                 json.dumps(indicators), executed, trade_id,
             ))
     return sig_id
+
+
+def update_signal(sig_id: str, executed: bool, trade_id: Optional[str] = None) -> None:
+    """Mark an existing signal as executed and link it to a trade."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "Signal"
+                SET executed = %s, "tradeId" = %s
+                WHERE id = %s
+            """, (executed, trade_id, sig_id))
 
 
 # ─── AuditLog ─────────────────────────────────────────────────────────────────

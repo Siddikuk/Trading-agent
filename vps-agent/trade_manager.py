@@ -17,7 +17,7 @@ from config import (
     PIP_SIZE,
 )
 from database import get_open_trades, close_trade, create_audit_log
-from mt5_client import modify_position_sl
+from mt5_client import modify_position_sl, fetch_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -90,13 +90,36 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
         matched_ticket = _find_mt5_ticket(trade, mt5_positions)
 
         if matched_ticket is None:
-            # Trade not found in MT5 — it was closed externally (SL/TP hit, manual close)
+            # Trade not found in MT5 — closed externally (SL/TP hit, manual close, broker action)
             logger.info("Trade %s not found in MT5 — marking CLOSED", trade_id[:8])
-            # Estimate PnL from last known position data (not available) — use 0 as placeholder
-            close_trade(trade_id, exit_price=0.0, pnl=0.0)
+
+            # Fetch current quote to estimate exit price (best approximation without ticket)
+            exit_price = entry_price  # fallback
+            estimated_pnl = 0.0
+            try:
+                quotes = await fetch_quotes([symbol])
+                q = quotes.get(symbol, {})
+                if q:
+                    # Use mid-price as proxy for exit price
+                    bid = float(q.get("bid") or q.get("last") or entry_price)
+                    ask = float(q.get("ask") or bid)
+                    exit_price = (bid + ask) / 2.0
+                    pip = PIP_SIZE.get(symbol, 0.0001)
+                    lot_size = float(trade.get("lotSize") or 0.01)
+                    # Rough PnL: pips × pip_value × lots (pip_value ≈ $1 for 0.01 lots standard)
+                    pips = _pips_profit(direction, entry_price, exit_price, symbol)
+                    # 1 pip = pip_size price movement; for standard lot $10/pip, micro $0.10/pip
+                    pip_value = 10.0 * lot_size  # approximate; broker handles exact
+                    estimated_pnl = pips * pip_value
+            except Exception as e:
+                logger.warning("Could not fetch quote for closed trade %s: %s", trade_id[:8], e)
+
+            close_trade(trade_id, exit_price=exit_price, pnl=estimated_pnl)
             create_audit_log("TRADE_SYNCED_CLOSED", symbol, {
                 "trade_id": trade_id,
                 "reason": "Not found in MT5 positions",
+                "exit_price": exit_price,
+                "estimated_pnl": estimated_pnl,
             })
             continue
 

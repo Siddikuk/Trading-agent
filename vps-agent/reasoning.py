@@ -222,8 +222,8 @@ async def _call_claude(prompt: str) -> str:
             try:
                 msg = _client.messages.create(
                     model=CLAUDE_MODEL,
-                    max_tokens=4096,
-                    thinking={"type": "adaptive"},
+                    max_tokens=16000,           # total budget (thinking + output)
+                    thinking={"type": "adaptive", "budget_tokens": 10000},
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -286,8 +286,21 @@ def _parse_decision(raw: str, symbol: str, current_price: float) -> AIDecision:
     # Validate prices are sensible
     if direction in ("BUY", "SELL"):
         if stop_loss <= 0 or take_profit <= 0:
-            logger.warning("Invalid SL/TP from Claude — overriding to HOLD")
+            logger.warning("Invalid SL/TP from Claude (zero/negative) — overriding to HOLD")
             return _fallback(symbol, current_price, "Invalid SL/TP values")
+        # Enforce correct SL/TP direction — prevents reversed logic from executing real orders
+        if direction == "BUY" and not (stop_loss < entry_price < take_profit):
+            logger.warning(
+                "BUY SL/TP wrong side: entry=%.5f SL=%.5f TP=%.5f — HOLD",
+                entry_price, stop_loss, take_profit,
+            )
+            return _fallback(symbol, current_price, "BUY SL/TP not below/above entry")
+        if direction == "SELL" and not (take_profit < entry_price < stop_loss):
+            logger.warning(
+                "SELL SL/TP wrong side: entry=%.5f SL=%.5f TP=%.5f — HOLD",
+                entry_price, stop_loss, take_profit,
+            )
+            return _fallback(symbol, current_price, "SELL SL/TP not above/below entry")
         if rr == 0 and stop_loss > 0 and take_profit > 0:
             risk   = abs(entry_price - stop_loss)
             reward = abs(entry_price - take_profit)

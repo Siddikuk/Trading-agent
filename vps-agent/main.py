@@ -21,7 +21,7 @@ import sys
 import time
 
 from config import SCAN_INTERVAL_MINUTES, IDLE_POLL_SECONDS
-from database import run_migrations, ensure_agent_state, get_agent_state
+from database import run_migrations, ensure_agent_state, get_agent_state, close_pool
 from agent import run_cycle
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -105,7 +105,10 @@ def main():
         sys.exit(1)
 
     logger.info("DB ready. Starting scheduler.")
-    asyncio.run(_scheduler())
+    try:
+        asyncio.run(_scheduler())
+    finally:
+        close_pool()
 
 
 if __name__ == "__main__":

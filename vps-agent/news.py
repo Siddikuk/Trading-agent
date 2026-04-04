@@ -158,10 +158,14 @@ def fetch_news(symbol: str) -> list[NewsArticle]:
     articles: list[NewsArticle] = []
 
     for e in raw_entries:
-        title   = e["title"].strip()
-        snippet = e["snippet"].strip()
+        title   = (e["title"] or "").strip()[:500]
+        snippet = (e["snippet"] or "").strip()[:1000]
         ts      = e["ts"]
         link    = e["link"]
+
+        # Skip entries with no usable title
+        if not title:
+            continue
 
         # Age filter
         if ts < cutoff_ts:

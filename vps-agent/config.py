@@ -3,16 +3,31 @@ config.py — All constants, environment variable loading, and symbol/timeframe 
 """
 
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _require_env(key: str) -> str:
+    """Read a required env var and exit with a clear message if it's missing."""
+    val = os.getenv(key, "").strip()
+    if not val:
+        print(
+            f"FATAL: Required environment variable '{key}' is not set.\n"
+            f"       Copy vps-agent/.env.example to vps-agent/.env and fill in all values.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return val
+
+
 # ─── Claude API ───────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY: str = os.environ["ANTHROPIC_API_KEY"]
+ANTHROPIC_API_KEY: str = _require_env("ANTHROPIC_API_KEY")
 CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
 # ─── Database ─────────────────────────────────────────────────────────────────
-DATABASE_URL: str = os.environ["DATABASE_URL"]
+DATABASE_URL: str = _require_env("DATABASE_URL")
 
 # ─── MT5 Bridge ───────────────────────────────────────────────────────────────
 # Agent runs on the same VPS as the bridge — no Cloudflare tunnel needed.
