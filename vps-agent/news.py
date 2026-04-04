@@ -8,6 +8,7 @@ from __future__ import annotations
 import email.utils
 import hashlib
 import logging
+import ssl
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -15,6 +16,17 @@ from typing import Any, Optional
 from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+# Windows Python often lacks system CA certs — use certifi bundle if available
+_SSL_CTX: ssl.SSLContext
+try:
+    import certifi
+    _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CTX = ssl.create_default_context()
+    # Fallback: disable verification so news failures don't block trading
+    _SSL_CTX.check_hostname = False
+    _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 from config import (
     RSS_FEEDS,
@@ -141,8 +153,8 @@ def _fetch_rss_all() -> list[dict]:
 
     for feed_url in RSS_FEEDS:
         try:
-            req = Request(feed_url, headers={"User-Agent": "TradingAgent/1.0 RSS Reader"})
-            with urlopen(req, timeout=10) as resp:
+            req = Request(feed_url, headers={"User-Agent": "Mozilla/5.0 TradingAgent/1.0 RSS Reader"})
+            with urlopen(req, timeout=10, context=_SSL_CTX) as resp:
                 raw = resp.read()
             root = ET.fromstring(raw)
         except (URLError, ET.ParseError, Exception) as e:

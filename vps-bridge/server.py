@@ -310,19 +310,21 @@ async def get_candles(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"MT5 error: {e}")
 
-    if not rates:
+    if rates is None or len(rates) == 0:
         raise HTTPException(status_code=404, detail=f"No candle data for {symbol} {timeframe}")
 
     candles = []
     for r in rates:
+        real_vol = int(r["real_volume"]) if "real_volume" in r.dtype.names else 0
+        tick_vol = int(r["tick_volume"]) if "tick_volume" in r.dtype.names else 0
         candles.append({
             "time": int(r["time"]),
-            "open": round(r["open"], 8),
-            "high": round(r["high"], 8),
-            "low": round(r["low"], 8),
-            "close": round(r["close"], 8),
-            "volume": int(r["real_volume"]) if r["real_volume"] else int(r["tick_volume"]),
-            "tick_volume": int(r["tick_volume"]),
+            "open": round(float(r["open"]), 8),
+            "high": round(float(r["high"]), 8),
+            "low": round(float(r["low"]), 8),
+            "close": round(float(r["close"]), 8),
+            "volume": real_vol if real_vol != 0 else tick_vol,
+            "tick_volume": tick_vol,
             "spread": int(r["spread"]) if "spread" in r.dtype.names else 0,
         })
 
@@ -341,7 +343,7 @@ async def get_positions():
     ensure_mt5()
 
     positions = mt5.positions_get()
-    if not positions:
+    if positions is None or len(positions) == 0:
         return {"positions": [], "count": 0, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     results = []
@@ -544,7 +546,7 @@ async def close_position(request: dict):
     if close_type == "ALL" and symbol:
         # Close all positions for a symbol
         positions = mt5.positions_get(symbol=mt5_symbol(symbol))
-        if not positions:
+        if positions is None or len(positions) == 0:
             return {"success": True, "message": f"No open positions for {symbol}", "closed": 0}
 
         results = []
@@ -564,7 +566,7 @@ async def close_position(request: dict):
     elif close_type == "ALL":
         # Close ALL open positions
         positions = mt5.positions_get()
-        if not positions:
+        if positions is None or len(positions) == 0:
             return {"success": True, "message": "No open positions", "closed": 0}
 
         results = []
@@ -584,7 +586,7 @@ async def close_position(request: dict):
     elif ticket:
         # Close specific position by ticket
         positions = mt5.positions_get(ticket=ticket)
-        if not positions:
+        if positions is None or len(positions) == 0:
             return {"success": False, "error": f"Position #{ticket} not found"}
 
         result = _close_single_position(positions[0])
