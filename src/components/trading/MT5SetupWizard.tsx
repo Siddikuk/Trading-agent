@@ -151,8 +151,13 @@ const STEPS: WizardStep[] = [
     title: 'Connect Dashboard',
     icon: <PartyPopper className="w-5 h-5" />,
     description:
-      'Almost done! Now let\'s link your dashboard to the bridge. Enter your VPS IP address below and we\'ll test the connection. If it works — you\'re live! 🎉',
-    codeBlocks: [],
+      'Almost done! Now let\'s link your dashboard to the bridge. Enter your Cloudflare Tunnel URL (from Step 7) or your VPS IP + port below and we\'ll test the connection. If it works — you\'re live! 🎉',
+    codeBlocks: [
+      {
+        label: 'If using Cloudflare Tunnel — paste the URL shown in Step 7',
+        code: 'https://electric-varies-cube-acquisitions.trycloudflare.com',
+      },
+    ],
   },
 ];
 
@@ -314,7 +319,19 @@ export default function MT5SetupWizard({
     setTestMessage('');
 
     try {
-      const bridgeUrl = `http://${vpsIp.trim()}:${vpsPort.trim()}`;
+      // Detect if input is a full URL (https://...) or IP:Port
+      const input = vpsIp.trim();
+      let bridgeUrl: string;
+      if (input.startsWith('http://') || input.startsWith('https://')) {
+        bridgeUrl = input.replace(/\/+$/, ''); // strip trailing slashes
+      } else if (input.includes(':')) {
+        // e.g. "192.168.1.100:8080"
+        bridgeUrl = `http://${input}`;
+      } else {
+        // Bare IP — use default port
+        bridgeUrl = `http://${input}:${vpsPort.trim()}`;
+      }
+
       const res = await fetch('/api/forex/mt5/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -330,7 +347,7 @@ export default function MT5SetupWizard({
         onComplete?.(bridgeUrl);
       } else {
         setTestResult('error');
-        setTestMessage(data.error || 'Could not reach the bridge. Check your IP and port.');
+        setTestMessage(data.error || 'Could not reach the bridge. Check your URL.');
       }
     } catch {
       setTestResult('error');
@@ -461,37 +478,21 @@ export default function MT5SetupWizard({
           {/* Step 8 — Connection test UI */}
           {isLastStep && (
             <div className="space-y-4 mt-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">
-                    VPS IP Address
-                  </label>
-                  <Input
-                    placeholder="e.g. 192.168.1.100"
-                    value={vpsIp}
-                    onChange={e => {
-                      setVpsIp(e.target.value);
-                      setTestResult('idle');
-                      setTestMessage('');
-                    }}
-                    className="font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">
-                    Port
-                  </label>
-                  <Input
-                    placeholder="8080"
-                    value={vpsPort}
-                    onChange={e => {
-                      setVpsPort(e.target.value);
-                      setTestResult('idle');
-                      setTestMessage('');
-                    }}
-                    className="font-mono text-sm"
-                  />
-                </div>
+              {/* Tunnel URL input */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">
+                  Bridge URL (Cloudflare Tunnel or IP:Port)
+                </label>
+                <Input
+                  placeholder="https://your-tunnel.trycloudflare.com  or  http://192.168.1.100:8080"
+                  value={vpsIp}
+                  onChange={e => {
+                    setVpsIp(e.target.value);
+                    setTestResult('idle');
+                    setTestMessage('');
+                  }}
+                  className="font-mono text-sm"
+                />
               </div>
 
               <Button

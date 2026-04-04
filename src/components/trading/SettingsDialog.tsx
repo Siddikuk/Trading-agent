@@ -88,7 +88,7 @@ export default function SettingsDialog({
             </div>
             <div className="flex gap-2">
               <Input
-                placeholder="http://your-vps-ip:8080"
+                placeholder="https://your-tunnel.trycloudflare.com"
                 value={bridgeUrlInput || mt5BridgeUrl || ''}
                 onChange={e => setBridgeUrlInput(e.target.value)}
                 className="h-8 text-xs font-mono flex-1"
