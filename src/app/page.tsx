@@ -115,8 +115,12 @@ export default function TradingTerminal() {
     const savedUrl = localStorage.getItem('mt5_bridge_url');
     if (savedUrl) {
       setMt5BridgeUrl(savedUrl);
-      // Auto-test connection via server proxy
-      testMT5Connection(savedUrl).then(ok => setMt5Connected(ok));
+      // Auto-test connection via server proxy — also save to server
+      fetch('/api/forex/mt5/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: savedUrl }),
+      }).then(() => testMT5Connection(savedUrl).then(ok => setMt5Connected(ok)));
     }
   }, [testMT5Connection]);
 
@@ -129,15 +133,19 @@ export default function TradingTerminal() {
         fetch('/api/forex/mt5/positions', { headers }),
       ]);
       if (accRes.status === 'fulfilled' && accRes.value.ok) {
-        const accData = await accRes.value.json();
-        if (accData.balance !== undefined) {
-          setMt5Account(accData);
-          setMt5Connected(true);
-        }
+        try {
+          const accData = await accRes.value.json();
+          if (accData.balance !== undefined) {
+            setMt5Account(accData);
+            setMt5Connected(true);
+          }
+        } catch {}
       }
       if (posRes.status === 'fulfilled' && posRes.value.ok) {
-        const posData = await posRes.value.json();
-        if (posData.positions) setMt5Positions(posData.positions);
+        try {
+          const posData = await posRes.value.json();
+          if (posData.positions) setMt5Positions(posData.positions);
+        } catch {}
       }
     } catch {}
   }, [mt5BridgeUrl]);
