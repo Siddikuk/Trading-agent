@@ -45,17 +45,30 @@ WATCH_SYMBOLS: list[str] = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "XAU/USD"
 ]
 
+# Broker suffixes stripped when converting MT5 symbol → canonical
+_MT5_SUFFIXES = ('+', '.std', '.raw', '.r', '.m', '.i', '.pro', '.ecn', '-e', '.stp', '.t', '.n', '.c', '.sp')
+
 # MT5 uses no slash; bridge expects this format
 def to_mt5_symbol(symbol: str) -> str:
     return symbol.replace("/", "")
 
 def from_mt5_symbol(mt5_sym: str) -> str:
+    """Convert any broker MT5 symbol to canonical display form (e.g. EUR/USD)."""
+    upper = mt5_sym.upper()
+    # Strip broker suffix first
+    for sfx in _MT5_SUFFIXES:
+        if upper.endswith(sfx.upper()):
+            upper = upper[:-len(sfx)]
+            break
     pairs = {
         "EURUSD": "EUR/USD", "GBPUSD": "GBP/USD",
         "USDJPY": "USD/JPY", "USDCHF": "USD/CHF",
-        "XAUUSD": "XAU/USD",
+        "XAUUSD": "XAU/USD", "BTCUSD": "BTC/USD",
+        "AUDUSD": "AUD/USD", "NZDUSD": "NZD/USD",
+        "USDCAD": "USD/CAD", "GBPJPY": "GBP/JPY",
+        "EURJPY": "EUR/JPY", "EURGBP": "EUR/GBP",
     }
-    return pairs.get(mt5_sym, mt5_sym)
+    return pairs.get(upper, mt5_sym)
 
 # Timeframes analysed per symbol (top-down order)
 TIMEFRAMES: list[str] = os.getenv(
@@ -115,6 +128,13 @@ PIP_SIZE: dict[str, float] = {
     "USD/JPY": 0.01,
     "USD/CHF": 0.0001,
     "XAU/USD": 0.1,     # Gold — 1 pip = $0.10 per lot
+    "AUD/USD": 0.0001,
+    "NZD/USD": 0.0001,
+    "USD/CAD": 0.0001,
+    "GBP/JPY": 0.01,
+    "EUR/JPY": 0.01,
+    "EUR/GBP": 0.0001,
+    "BTC/USD": 1.0,     # Bitcoin — 1 pip = $1
 }
 
 # ─── Claude reasoning ─────────────────────────────────────────────────────────
@@ -165,4 +185,18 @@ SYMBOL_KEYWORDS: dict[str, list[str]] = {
                 "usd", "fed", "switzerland"],
     "XAU/USD": ["gold", "xau", "bullion", "precious metal",
                 "dollar", "usd", "fed", "inflation"],
+    "AUD/USD": ["australian dollar", "aud", "reserve bank of australia", "rba",
+                "australia", "dollar", "usd", "fed", "china", "commodities"],
+    "NZD/USD": ["new zealand dollar", "nzd", "reserve bank of new zealand", "rbnz",
+                "new zealand", "dollar", "usd", "fed"],
+    "USD/CAD": ["canadian dollar", "cad", "bank of canada", "boc",
+                "canada", "oil", "crude", "dollar", "usd", "fed"],
+    "GBP/JPY": ["pound", "gbp", "sterling", "bank of england", "boe",
+                "yen", "jpy", "bank of japan", "boj", "japan"],
+    "EUR/JPY": ["euro", "eur", "ecb", "eurozone", "european central bank",
+                "yen", "jpy", "bank of japan", "boj", "japan"],
+    "EUR/GBP": ["euro", "eur", "ecb", "eurozone",
+                "pound", "gbp", "sterling", "bank of england", "boe", "brexit"],
+    "BTC/USD": ["bitcoin", "btc", "crypto", "cryptocurrency",
+                "dollar", "usd", "digital asset", "blockchain"],
 }

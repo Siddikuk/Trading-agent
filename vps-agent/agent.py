@@ -369,19 +369,64 @@ def _now_str() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# Symbol format map: handles Yahoo Finance (EURUSD=X), MT5 (EURUSD), and display (EUR/USD)
+# Known broker suffixes stripped before symbol lookup
+_KNOWN_SUFFIXES = (
+    '+', '.std', '.raw', '.r', '.m', '.i', '.pro',
+    '.ecn', '-e', '.stp', '.t', '.n', '.c', '.sp',
+)
+
+# Symbol format map — handles Yahoo Finance (=X), MT5 bare, display (slash),
+# and all common broker suffix variants. Add new rows here for any new pair.
+def _variants(base: str, canonical: str) -> dict[str, str]:
+    """Return a dict with bare + all suffix variants mapped to canonical."""
+    sfx = ('+', '.std', '.raw', '.r', '.m', '.i', '.pro', '.ecn', '-e', '.stp', '.t', '.n', '.c', '.sp')
+    d: dict[str, str] = {base: canonical}
+    for s in sfx:
+        d[base + s.upper()] = canonical
+    return d
+
 _SYMBOL_CANONICAL: dict[str, str] = {
-    "EURUSD=X": "EUR/USD", "EURUSD": "EUR/USD",
-    "GBPUSD=X": "GBP/USD", "GBPUSD": "GBP/USD",
-    "USDJPY=X": "USD/JPY", "USDJPY": "USD/JPY",
-    "USDCHF=X": "USD/CHF", "USDCHF": "USD/CHF",
-    "XAUUSD=X": "XAU/USD", "XAUUSD": "XAU/USD",
-    "GC=F":     "XAU/USD",
-    "BTCUSD=X": "BTC/USD", "BTCUSD": "BTC/USD",
-    "BTC-USD":  "BTC/USD",
+    # Yahoo Finance formats
+    "EURUSD=X": "EUR/USD", "GBPUSD=X": "GBP/USD",
+    "USDJPY=X": "USD/JPY", "USDCHF=X": "USD/CHF",
+    "XAUUSD=X": "XAU/USD", "GC=F": "XAU/USD",
+    "BTCUSD=X": "BTC/USD", "BTC-USD": "BTC/USD",
+    "AUDUSD=X": "AUD/USD", "NZDUSD=X": "NZD/USD",
+    "USDCAD=X": "USD/CAD", "GBPJPY=X": "GBP/JPY",
+    "EURJPY=X": "EUR/JPY", "EURGBP=X": "EUR/GBP",
+    # Slash formats
+    "EUR/USD": "EUR/USD", "GBP/USD": "GBP/USD",
+    "USD/JPY": "USD/JPY", "USD/CHF": "USD/CHF",
+    "XAU/USD": "XAU/USD", "BTC/USD": "BTC/USD",
+    "AUD/USD": "AUD/USD", "NZD/USD": "NZD/USD",
+    "USD/CAD": "USD/CAD", "GBP/JPY": "GBP/JPY",
+    "EUR/JPY": "EUR/JPY", "EUR/GBP": "EUR/GBP",
 }
+
+# Add bare + all suffix variants for each pair
+for _base, _canonical in [
+    ("EURUSD", "EUR/USD"), ("GBPUSD", "GBP/USD"),
+    ("USDJPY", "USD/JPY"), ("USDCHF", "USD/CHF"),
+    ("XAUUSD", "XAU/USD"), ("BTCUSD", "BTC/USD"),
+    ("AUDUSD", "AUD/USD"), ("NZDUSD", "NZD/USD"),
+    ("USDCAD", "USD/CAD"), ("GBPJPY", "GBP/JPY"),
+    ("EURJPY", "EUR/JPY"), ("EURGBP", "EUR/GBP"),
+]:
+    _SYMBOL_CANONICAL.update(_variants(_base, _canonical))
 
 
 def _normalize_symbol(raw: str) -> str:
-    """Normalise any known symbol format to display format (EUR/USD)."""
-    return _SYMBOL_CANONICAL.get(raw.upper(), raw)
+    """Normalise any broker symbol format to display format (e.g. EUR/USD).
+
+    Handles: EURUSD, EURUSD+, EURUSD.std, EURUSD.raw, EUR/USD, EURUSD=X, etc.
+    """
+    upper = raw.upper()
+    if upper in _SYMBOL_CANONICAL:
+        return _SYMBOL_CANONICAL[upper]
+    # Fallback: strip broker suffix and retry
+    for sfx in _KNOWN_SUFFIXES:
+        if upper.endswith(sfx.upper()):
+            base = upper[:-len(sfx)]
+            if base in _SYMBOL_CANONICAL:
+                return _SYMBOL_CANONICAL[base]
+    return raw
