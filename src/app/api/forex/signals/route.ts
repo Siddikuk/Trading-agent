@@ -3,6 +3,7 @@ import { fetchCandles } from '@/lib/market-data';
 import { yahooSymbol, getAllIndicators, analyzeSymbol, combineSignals } from '@/lib/trading-engine';
 import { analyzeWithAI } from '@/lib/ai-agent';
 import { db } from '@/lib/db';
+import { getEffectiveBridgeUrl, fetchMT5Account } from '@/lib/mt5-provider';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -32,7 +33,16 @@ export async function GET(req: Request) {
 
     if (useAI) {
       // AI-powered analysis (slower but intelligent)
-      const decision = await analyzeWithAI(symbolParam, timeframe, 1000, 2, true);
+      // Use real MT5 balance if available, otherwise default to $1000
+      let balance = 1000;
+      try {
+        const bridgeUrl = getEffectiveBridgeUrl(req);
+        if (bridgeUrl) {
+          const account = await fetchMT5Account(bridgeUrl);
+          if (account?.balance) balance = account.balance;
+        }
+      } catch { /* use default */ }
+      const decision = await analyzeWithAI(symbolParam, timeframe, balance, 2, true);
 
       // Save signal to database if confident
       if (decision.shouldTrade && decision.confidence >= 50) {

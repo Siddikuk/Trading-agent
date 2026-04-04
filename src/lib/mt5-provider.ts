@@ -124,6 +124,23 @@ export function getEffectiveBridgeUrl(req: Request): string | null {
   return getBridgeUrlFromRequest(req) || bridgeUrl;
 }
 
+/** Load bridge URL from database (for Vercel cold starts) */
+export async function restoreBridgeUrlFromDB(): Promise<string | null> {
+  if (bridgeUrl) return bridgeUrl; // Already loaded
+  try {
+    const { db } = await import('@/lib/db');
+    const setting = await db.setting.findUnique({ where: { key: 'mt5_bridge_url' } });
+    if (setting?.value) {
+      bridgeUrl = setting.value;
+      console.log('[MT5] Restored bridge URL from DB:', bridgeUrl);
+      return bridgeUrl;
+    }
+  } catch {
+    // DB not ready — return null
+  }
+  return null;
+}
+
 // ==================== SYMBOL MAPPING ====================
 
 // Convert our display format (e.g. "EUR/USD") to MT5 format (e.g. "EURUSD")
@@ -188,6 +205,11 @@ export async function isMT5Connected(): Promise<boolean> {
   // Use cached result if still valid
   if (connectionStatus.lastCheck > 0 && Date.now() - connectionStatus.lastCheck < CONNECTION_CACHE_TTL) {
     return connectionStatus.connected;
+  }
+
+  // Try to restore from DB if in-memory is empty (cold start)
+  if (!bridgeUrl) {
+    await restoreBridgeUrlFromDB();
   }
 
   if (!bridgeUrl) {

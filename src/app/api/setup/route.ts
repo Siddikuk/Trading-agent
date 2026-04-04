@@ -93,6 +93,14 @@ export async function GET() {
     `);
 
     await sql.query(`
+      CREATE TABLE IF NOT EXISTS "Setting" (
+        "key" TEXT NOT NULL PRIMARY KEY,
+        "value" TEXT NOT NULL,
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await sql.query(`
       INSERT INTO "AgentState" ("id")
       SELECT 'main'
       WHERE NOT EXISTS (SELECT 1 FROM "AgentState" WHERE "id" = 'main')
