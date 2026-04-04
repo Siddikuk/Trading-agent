@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server';
 
 // ==================== NEWS FILTERING ====================
-// Quality standards for trading-relevant news.
-// Only real market-moving news from credible financial sources.
-
-// Blacklisted domains — broker ads, tutorials, social media, video sites
 const JUNK_DOMAINS = new Set([
   'youtube.com', 'youtu.be', 'wikipedia.org', 'wikihow.com',
   'reddit.com', 'quora.com', 'pinterest.com', 'facebook.com',
@@ -15,34 +11,23 @@ const JUNK_DOMAINS = new Set([
   'pepperstone.com', 'icmarkets.com', 'exness.com', 'xm.com',
   'forex.com', 'babypips.com', 'dailyfx.com', 'forexfactory.com',
   'tripadvisor.com', 'amazon.com', 'ebay.com', 'booking.com',
-  'pinterest.com', 'craigslist.org', 'yelp.com', 'zillow.com',
+  'craigslist.org', 'yelp.com', 'zillow.com',
 ]);
 
-// Title keywords that indicate junk content
 const JUNK_KEYWORDS = [
   'what is forex', 'what is trading', 'what is currency',
   'how to trade', 'how to start', 'how to read',
-  'forex for beginners', 'forex 101', 'trading for beginners', 'trading 101',
-  'learn forex', 'learn trading', 'learn to trade',
-  'forex basics', 'trading basics', 'the basics',
-  'forex meaning', 'forex explained', 'trading explained',
-  'forex tutorial', 'trading tutorial', 'tutorial',
-  'forex course', 'trading course', 'online course',
-  'forex guide', 'beginner guide', 'complete guide',
+  'forex for beginners', 'forex 101', 'trading for beginners',
+  'learn forex', 'learn trading', 'forex basics', 'trading basics',
+  'forex tutorial', 'trading tutorial', 'forex course', 'trading course',
   'start trading', 'open account', 'sign up', 'register now',
-  'trade forex online', 'try demo', 'practice account',
   'best forex broker', 'top forex broker', 'broker review',
-  'low spreads', 'award winning',
-  'trade with', 'start with', 'join now', 'get started',
-  'no experience', 'zero commission', 'bonus', 'promotional',
-  'meaning & how', 'meaning and how', 'how it works',
-  'setup explained', 'thanks for watching', 'subscribe',
-  'like and subscribe', 'deepening my understanding',
+  'zero commission', 'bonus', 'promotional',
+  'thanks for watching', 'subscribe', 'like and subscribe',
   'video:', 'watch:', 'episode', 'podcast:',
   'pinterest', 'tripadvisor', 'amazon', 'booking.com',
 ];
 
-// Tier 1 news sources — highest trust (wire services + major financial outlets)
 const TIER1 = new Set([
   'reuters.com', 'bloomberg.com', 'cnbc.com', 'wsj.com', 'ft.com',
   'marketwatch.com', 'investing.com', 'forexlive.com', 'fxstreet.com',
@@ -50,80 +35,27 @@ const TIER1 = new Set([
   'theguardian.com', 'imf.org', 'cmegroup.com', 'cnn.com',
 ]);
 
-// Tier 2 — solid financial news
-const TIER2 = new Set([
-  'finance.yahoo.com', 'money.cnn.com', 'barrons.com',
-  'seekingalpha.com', 'coindesk.com', 'cointelegraph.com',
-  'kitco.com', 'nasdaq.com', 'investopedia.com',
-  'financial-times.com', 'nytimes.com', 'washingtonpost.com',
-  'aljazeera.com', 'sky.com', 'nbcnews.com', 'abcnews.go.com',
-]);
-
 function isJunk(title: string, snippet: string): boolean {
   const combined = `${title} ${snippet}`.toLowerCase();
   return JUNK_KEYWORDS.some(k => combined.includes(k));
 }
 
-function isJunkDomain(host: string): boolean {
-  if (!host) return true;
-  const h = host.toLowerCase();
-  for (const junk of JUNK_DOMAINS) {
-    if (h.includes(junk)) return true;
-  }
-  return false;
-}
-
 function scoreSource(host: string): number {
   if (!host) return 0;
   const h = host.toLowerCase();
-
-  // Instant reject junk domains
-  if (isJunkDomain(h)) return 0;
-
-  // Tier 1 = highest trust
-  for (const t1 of TIER1) {
-    if (h.includes(t1)) return 90;
-  }
-
-  // Tier 2 = solid financial news
-  for (const t2 of TIER2) {
-    if (h.includes(t2)) return 75;
-  }
-
-  // Moderate financial news keywords in domain
-  const strongKeywords = ['news', 'finance', 'market', 'investing', 'stock', 'commodit', 'tradingeconomics', 'capital', 'trader', 'fx', 'forex'];
-  if (strongKeywords.some(k => h.includes(k))) return 45;
-
-  // Any .com, .co.uk, .org, .net, .io — give moderate score
-  // so we don't filter out legitimate smaller news sites
-  if (h.endsWith('.com') || h.endsWith('.co.uk') || h.endsWith('.org') || h.endsWith('.net') || h.endsWith('.io')) {
-    return 25;
-  }
-
-  // Country-code TLDs that often have legitimate news (.de, .fr, .jp, etc.)
-  if (/\.([a-z]{2})$/.test(h)) {
-    return 20;
-  }
-
-  return 10;
+  for (const junk of JUNK_DOMAINS) { if (h.includes(junk)) return 0; }
+  for (const t1 of TIER1) { if (h.includes(t1)) return 90; }
+  if (/news|finance|market|investing|stock|capital|trader/.test(h)) return 50;
+  if (/\.com|\.org|\.net|\.io/.test(h)) return 30;
+  return 15;
 }
 
-// ==================== QUERY BUILDER ====================
-// Target REAL market-moving events: central bank decisions, geopolitics,
-// economic data releases, sanctions, trade wars.
-
 function buildMarketNewsQueries(): string[] {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-
   return [
-    // Macro/geopolitical — the stuff that ACTUALLY moves currencies
-    `forex currency market breaking news today central bank economic data`,
-    `geopolitical news sanctions war trade tariff impact currency today`,
-    // Central bank focus
-    `Federal Reserve ECB Bank of Japan interest rate monetary policy decision today`,
-    // Economic data
-    `US dollar euro yen pound inflation GDP jobs economic data release today`,
+    `forex currency market breaking news today`,
+    `Federal Reserve ECB interest rate decision today`,
+    `US dollar euro yen inflation GDP economic data today`,
+    `geopolitics sanctions trade war currency impact today`,
   ];
 }
 
@@ -131,54 +63,86 @@ function buildMarketNewsQueries(): string[] {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const userQuery = searchParams.get('q');
+  const debug = searchParams.get('debug') === '1';
 
   try {
     const ZAI = (await import('z-ai-web-dev-sdk')).default;
     const zai = await ZAI.create();
 
-    // Use user query if provided and looks specific, otherwise use intelligent defaults
-    const queries = (userQuery && userQuery.length > 5)
+    const queries = (userQuery && userQuery.length > 3)
       ? [userQuery, ...buildMarketNewsQueries().slice(0, 1)]
       : buildMarketNewsQueries();
 
-    // Fetch from multiple queries in parallel — use recency_days: 7 for broader results
-    const allResults = await Promise.allSettled(
-      queries.map(async (q) => {
-        const results = await zai.functions.invoke('web_search', {
-          query: q,
-          num: 15,
-          recency_days: 7,
-        });
-        return results || [];
+    // Fetch all queries in parallel
+    const settled = await Promise.allSettled(
+      queries.map(async (q, idx) => {
+        try {
+          const results = await zai.functions.invoke('web_search', {
+            query: q,
+            num: 10,
+            recency_days: 7,
+          });
+          return { idx, query: q, results: results || [], status: 'ok' };
+        } catch (err) {
+          return { idx, query: q, results: [], status: 'error', error: String(err) };
+        }
       }),
     );
 
-    // Flatten and parse
-    const raw = allResults.flatMap(r =>
-      r.status === 'fulfilled' ? r.value : [],
-    ).map((r: Record<string, unknown>) => ({
-      title: String(r.name || ''),
-      url: String(r.url || ''),
-      snippet: String(r.snippet || ''),
-      source: String(r.host_name || ''),
-      date: String(r.date || ''),
-      score: scoreSource(String(r.host_name || '')),
-    }));
+    // Debug: show query-level results
+    const queryDiagnostics = settled.map(s => {
+      if (s.status === 'fulfilled') {
+        const d = s.value;
+        return { query: d.query, status: d.status, count: d.results.length, error: d.error || undefined };
+      }
+      return { query: 'unknown', status: 'rejected', error: String(s.reason) };
+    });
 
-    console.log(`[News API] Raw results: ${raw.length}, from ${allResults.filter(r => r.status === 'fulfilled').length}/${allResults.length} queries`);
+    // Flatten all results
+    const raw = settled.flatMap(s => {
+      if (s.status !== 'fulfilled') return [];
+      return s.value.results.map((r: Record<string, unknown>) => ({
+        title: String(r.name || r.title || ''),
+        url: String(r.url || ''),
+        snippet: String(r.snippet || r.description || ''),
+        source: String(r.host_name || r.domain || ''),
+        date: String(r.date || ''),
+        score: scoreSource(String(r.host_name || r.domain || '')),
+        // Keep raw keys for debugging
+        _rawKeys: Object.keys(r),
+      }));
+    });
 
-    // Apply quality filters — more lenient than before
+    // If debug mode, return raw data before filtering
+    if (debug) {
+      return NextResponse.json({
+        debug: true,
+        queries: queryDiagnostics,
+        totalRaw: raw.length,
+        rawSample: raw.slice(0, 5).map(r => ({
+          title: r.title,
+          source: r.source,
+          url: r.url,
+          score: r.score,
+          snippet: r.snippet?.slice(0, 100),
+          rawKeys: r._rawKeys,
+        })),
+        filterWouldPass: raw.length,
+      });
+    }
+
+    // Filter: only reject score=0 (junk domains) and actual junk titles
     const filtered = raw
       .filter(item => {
         if (item.score <= 0) return false;
-        if (item.title.length < 10) return false; // Relaxed from 15
-        if (item.url.length < 10) return false;    // Must have a valid URL
+        if (item.title.length < 8) return false;
+        if (item.url.length < 10) return false;
         if (isJunk(item.title, item.snippet)) return false;
         return true;
       })
       .sort((a, b) => b.score - a.score);
 
-    // Deduplicate by similar titles
+    // Deduplicate
     const seen = new Set<string>();
     const deduped = filtered.filter(item => {
       const key = item.title.toLowerCase().slice(0, 50);
@@ -189,15 +153,8 @@ export async function GET(req: Request) {
 
     const final = deduped.slice(0, 15);
 
-    console.log(`[News API] Filtered: ${filtered.length}, Deduped: ${deduped.length}, Final: ${final.length}`);
-    if (final.length === 0 && raw.length > 0) {
-      console.log(`[News API] All ${raw.length} results were filtered. Sample rejected titles:`, raw.slice(0, 3).map(r => `${r.title} (score:${r.score})`));
-    }
-
+    // If still empty, include diagnostic info in the response
     return NextResponse.json({
-      query: queries.join(' | '),
-      totalRaw: raw.length,
-      totalFiltered: final.length,
       results: final.map(({ title, url, snippet, source, date, score }) => ({
         title,
         url,
@@ -207,9 +164,26 @@ export async function GET(req: Request) {
         reliability: score >= 90 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW',
       })),
       fetchedAt: new Date().toISOString(),
+      // Include diagnostics so the frontend can show useful info
+      _debug: {
+        totalRaw: raw.length,
+        totalFiltered: filtered.length,
+        queries: queryDiagnostics,
+        ...(final.length === 0 && raw.length > 0 ? {
+          rejectedSample: raw.slice(0, 3).map(r => ({
+            title: r.title,
+            source: r.source,
+            score: r.score,
+            reason: r.score <= 0 ? 'junk domain' : r.title.length < 8 ? 'short title' : isJunk(r.title, r.snippet) ? 'junk keyword' : 'unknown',
+          })),
+        } : {}),
+      },
     });
   } catch (error) {
-    console.error('[News API] Error:', error);
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({
+      error: String(error),
+      results: [],
+      _debug: { errorPhase: 'init', error: String(error) },
+    }, { status: 500 });
   }
 }

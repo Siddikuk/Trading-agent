@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { Newspaper, RefreshCw, ExternalLink, ShieldCheck, Shield, ShieldAlert } from 'lucide-react';
+import { Newspaper, RefreshCw, ExternalLink, ShieldCheck, Shield, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -15,9 +15,23 @@ interface NewsTabProps {
   onRefresh: () => void;
 }
 
+interface DebugInfo {
+  totalRaw?: number;
+  totalFiltered?: number;
+  queries?: { query: string; status: string; count?: number; error?: string }[];
+  rejectedSample?: { title: string; source: string; score: number; reason: string }[];
+  errorPhase?: string;
+  error?: string;
+}
+
+interface NewsResponse {
+  results?: NewsItem[];
+  error?: string;
+  _debug?: DebugInfo;
+}
+
 function ReliabilityBadge({ reliability }: { reliability?: string }) {
   if (!reliability) return null;
-
   switch (reliability) {
     case 'HIGH':
       return (
@@ -42,7 +56,61 @@ function ReliabilityBadge({ reliability }: { reliability?: string }) {
   }
 }
 
+function DiagnosticsPanel({ debug }: { debug: DebugInfo }) {
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-destructive/5 border border-destructive/20 text-[10px] text-muted-foreground space-y-2">
+      <div className="flex items-center gap-1.5 text-destructive font-semibold">
+        <AlertTriangle className="w-3 h-3" />
+        News Diagnostics
+      </div>
+      {debug.errorPhase && (
+        <div>Error at <span className="text-destructive font-mono">{debug.errorPhase}</span>: {debug.error}</div>
+      )}
+      <div>Raw results: <span className="font-mono">{debug.totalRaw ?? 0}</span> | After filter: <span className="font-mono">{debug.totalFiltered ?? 0}</span></div>
+      {debug.queries && (
+        <div className="space-y-1">
+          <div className="font-semibold">Queries:</div>
+          {debug.queries.map((q, i) => (
+            <div key={i} className="flex items-start gap-1 ml-2">
+              <span className={q.status === 'ok' ? 'text-emerald-500' : 'text-destructive'}>
+                {q.status === 'ok' ? '✓' : '✗'}
+              </span>
+              <span className="font-mono">{q.count ?? 0} results</span>
+              {q.error && <span className="text-destructive"> — {q.error.slice(0, 80)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {debug.rejectedSample && debug.rejectedSample.length > 0 && (
+        <div className="space-y-1">
+          <div className="font-semibold">Rejected sample:</div>
+          {debug.rejectedSample.map((r, i) => (
+            <div key={i} className="ml-2">
+              <div className="truncate">"{r.title || '(empty title)'}"</div>
+              <div className="text-destructive">Reason: {r.reason} (score: {r.score}, source: {r.source})</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NewsTab({ news, loading, onRefresh }: NewsTabProps) {
+  const [debugInfo, setDebugInfo] = React.useState<DebugInfo | null>(null);
+
+  const handleRefresh = React.useCallback(async () => {
+    onRefresh();
+    // Also fetch with debug info to show diagnostics if empty
+    try {
+      const r = await fetch('/api/forex/news?debug=1');
+      const d: NewsResponse = await r.json();
+      setDebugInfo(d._debug || null);
+    } catch {
+      // ignore
+    }
+  }, [onRefresh]);
+
   return (
     <div className="flex-1 overflow-y-auto m-0 p-3">
       <div className="flex items-center justify-between mb-2">
@@ -50,14 +118,14 @@ export default function NewsTab({ news, loading, onRefresh }: NewsTabProps) {
           <Newspaper className="w-4 h-4 text-primary" />
           Market News
         </div>
-        <Button variant="ghost" size="sm" className="h-7 gap-1 text-[10px]" onClick={onRefresh}>
+        <Button variant="ghost" size="sm" className="h-7 gap-1 text-[10px]" onClick={handleRefresh}>
           <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
           Refresh
         </Button>
       </div>
 
       <p className="text-[9px] text-muted-foreground mb-3 leading-relaxed">
-        Real market-moving news: geopolitics, central bank decisions, economic data releases, sanctions, trade wars. No tutorials. No ads.
+        Real market-moving news: geopolitics, central bank decisions, economic data releases, sanctions, trade wars.
       </p>
 
       {loading ? (
@@ -117,11 +185,16 @@ export default function NewsTab({ news, loading, onRefresh }: NewsTabProps) {
           ))}
         </div>
       ) : (
-        <div className="text-center text-xs text-muted-foreground py-8 space-y-2">
+        <div className="text-center text-xs text-muted-foreground py-6 space-y-2">
           <Newspaper className="w-8 h-8 mx-auto text-muted-foreground/40" />
           <p>No quality news found.</p>
-          <p className="text-[10px]">This may be due to heavy filtering or search API limits. Click refresh to try again.</p>
+          <p className="text-[10px]">Click <strong>Refresh</strong> to fetch with diagnostics.</p>
         </div>
+      )}
+
+      {/* Show diagnostics panel if we have debug info and no results */}
+      {news.length === 0 && debugInfo && (
+        <DiagnosticsPanel debug={debugInfo} />
       )}
     </div>
   );
