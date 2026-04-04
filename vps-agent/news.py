@@ -5,14 +5,16 @@ Ported and extended from src/lib/ai-agent.ts news logic.
 
 from __future__ import annotations
 
+import email.utils
 import hashlib
 import logging
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Optional
+from urllib.error import URLError
 from urllib.parse import urlparse
-
-import feedparser
+from urllib.request import Request, urlopen
 
 from config import (
     RSS_FEEDS,
@@ -110,35 +112,66 @@ def _set_cached(symbol: str, articles: list[NewsArticle]) -> None:
 
 # ─── Fetcher ──────────────────────────────────────────────────────────────────
 
-def _parse_timestamp(entry: Any) -> float:
-    """Extract unix timestamp from a feedparser entry."""
-    import email.utils
+def _parse_date(date_str: str) -> float:
+    """Parse RFC 2822 or ISO 8601 date string to unix timestamp."""
+    if not date_str:
+        return time.time()
     try:
-        if hasattr(entry, "published_parsed") and entry.published_parsed:
-            return float(time.mktime(entry.published_parsed))
-        if hasattr(entry, "published") and entry.published:
-            parsed = email.utils.parsedate_to_datetime(entry.published)
-            return parsed.timestamp()
+        return email.utils.parsedate_to_datetime(date_str.strip()).timestamp()
     except Exception:
         pass
-    return time.time()  # fallback: treat as now
+    try:
+        from datetime import datetime, timezone
+        # Handle ISO 8601 with Z suffix
+        s = date_str.strip().replace("Z", "+00:00")
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        pass
+    return time.time()
 
 
 def _fetch_rss_all() -> list[dict]:
-    """Fetch and parse all RSS feeds. Returns raw entry dicts."""
+    """Fetch and parse all RSS feeds using stdlib only. Returns raw entry dicts."""
+    # XML namespaces used in Atom feeds
+    NS = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "media": "http://search.yahoo.com/mrss/",
+    }
     all_entries: list[dict] = []
+
     for feed_url in RSS_FEEDS:
         try:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:20]:  # cap per feed
-                all_entries.append({
-                    "title":   getattr(entry, "title", ""),
-                    "snippet": getattr(entry, "summary", "") or getattr(entry, "description", ""),
-                    "link":    getattr(entry, "link", feed_url),
-                    "ts":      _parse_timestamp(entry),
-                })
-        except Exception as e:
-            logger.warning("RSS parse failed %s: %s", feed_url, e)
+            req = Request(feed_url, headers={"User-Agent": "TradingAgent/1.0 RSS Reader"})
+            with urlopen(req, timeout=10) as resp:
+                raw = resp.read()
+            root = ET.fromstring(raw)
+        except (URLError, ET.ParseError, Exception) as e:
+            logger.warning("RSS fetch/parse failed %s: %s", feed_url, e)
+            continue
+
+        # ── RSS 2.0 ──────────────────────────────────────────────────────────
+        channel = root.find("channel")
+        if channel is not None:
+            for item in list(channel.findall("item"))[:20]:
+                title   = (item.findtext("title") or "").strip()
+                snippet = (item.findtext("description") or "").strip()
+                link    = (item.findtext("link") or feed_url).strip()
+                pub     = item.findtext("pubDate") or ""
+                all_entries.append({"title": title, "snippet": snippet,
+                                     "link": link, "ts": _parse_date(pub)})
+            continue
+
+        # ── Atom ─────────────────────────────────────────────────────────────
+        for entry in list(root.findall("{http://www.w3.org/2005/Atom}entry"))[:20]:
+            title   = (entry.findtext("{http://www.w3.org/2005/Atom}title") or "").strip()
+            summary = (entry.findtext("{http://www.w3.org/2005/Atom}summary") or "").strip()
+            link_el = entry.find("{http://www.w3.org/2005/Atom}link")
+            link    = (link_el.get("href") if link_el is not None else feed_url) or feed_url
+            pub     = (entry.findtext("{http://www.w3.org/2005/Atom}published") or
+                       entry.findtext("{http://www.w3.org/2005/Atom}updated") or "")
+            all_entries.append({"title": title, "snippet": summary,
+                                 "link": link, "ts": _parse_date(pub)})
+
     return all_entries
 
 
