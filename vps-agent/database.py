@@ -35,6 +35,10 @@ def _get_pool() -> pg_pool.ThreadedConnectionPool:
             minconn=1, maxconn=5,
             dsn=DATABASE_URL,
             cursor_factory=psycopg2.extras.RealDictCursor,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
         )
         logger.info("DB connection pool created")
     return _pool
@@ -51,17 +55,31 @@ def close_pool() -> None:
 
 @contextmanager
 def _conn():
+    global _pool
     p = _get_pool()
     conn = p.getconn()
     try:
         yield conn
         conn.commit()
     except Exception as exc:
-        conn.rollback()
-        logger.error("DB error (rolled back): %s", exc)
+        try:
+            conn.rollback()
+        except Exception:
+            pass  # connection already closed — nothing to rollback
+        logger.error("DB error: %s", exc)
+        # Stale/dropped connection — reset pool so next call reconnects fresh
+        if isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError)):
+            try:
+                _pool.closeall()
+            except Exception:
+                pass
+            _pool = None
         raise
     finally:
-        p.putconn(conn)
+        try:
+            p.putconn(conn)
+        except Exception:
+            pass
 
 
 def _now_iso() -> str:
