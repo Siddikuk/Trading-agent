@@ -159,3 +159,23 @@ Stage Summary:
 - Server-side proxy pattern working correctly
 - Header-based URL passing ensures resilience across hot-reloads
 - Commit: bf04193 fix: clean up MT5 bridge proxy
+
+---
+Task ID: 12
+Agent: main
+Task: Fix news API not returning results on Vercel deployment
+
+Work Log:
+- Diagnosed news API route had overly aggressive filtering: `recency_days: 1`, minimum title length 15, unknown domains scored 0
+- Broadened recency from 1 day to 7 days for more results
+- Lowered minimum title length from 15 to 10 characters
+- Made source scoring more generous: unknown .com/.org/.net domains now score 25 (previously 0-20)
+- Added Tier 2 source list (yahoo finance, barrons, seekingalpha, etc.)
+- Added better console logging for debugging filtered-out results
+- Fixed silent error swallowing in page.tsx fetchNews
+- Updated NewsTab empty state with better messaging
+- Pushed to GitHub: 7905072
+
+Stage Summary:
+- News API should now return results with broader time window and more lenient filtering
+- Commit: 7905072 fix: relax news filtering, broaden recency to 7 days, better error handling
