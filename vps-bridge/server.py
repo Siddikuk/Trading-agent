@@ -679,12 +679,23 @@ async def modify_position(request: dict):
         raise HTTPException(status_code=404, detail=f"Position #{ticket} not found")
 
     pos = positions[0]
-    if not mt5_sym:
-        mt5_sym = pos.symbol
+    # Always use the actual position symbol to avoid suffix mismatches
+    mt5_sym = pos.symbol
 
     # Use existing TP if caller didn't supply one
     if new_tp == 0:
         new_tp = pos.tp
+
+    # Enforce MT5 minimum stop distance so we never send an invalid stop
+    sym_info = mt5.symbol_info(mt5_sym)
+    tick = mt5.symbol_info_tick(mt5_sym)
+    if sym_info and tick and sym_info.trade_stops_level > 0:
+        min_dist = sym_info.trade_stops_level * sym_info.point
+        current_price = tick.bid if pos.type == 0 else tick.ask  # BUY→bid, SELL→ask
+        if pos.type == 0:  # BUY: SL must be below price
+            new_sl = min(new_sl, current_price - min_dist)
+        else:               # SELL: SL must be above price
+            new_sl = max(new_sl, current_price + min_dist)
 
     request_dict = {
         "action":   mt5.TRADE_ACTION_SLTP,
@@ -699,6 +710,17 @@ async def modify_position(request: dict):
     if result is None:
         error = mt5.last_error()
         return {"success": False, "error": f"order_send returned None: {error}"}
+
+    # 10025 = no change needed (SL already at target) — treat as success
+    if result.retcode == 10025:
+        logger.info(f"Position #{ticket} SL already at target (no change needed)")
+        return {
+            "success":   True,
+            "ticket":    ticket,
+            "sl":        new_sl,
+            "tp":        new_tp,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         return {
