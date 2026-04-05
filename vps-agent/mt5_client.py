@@ -296,9 +296,20 @@ async def place_order(
         "deviation": 20,
     }
 
+    async def _try_order(sess, sym):
+        return await _post(sess, "/api/mt5/order", {**body, "symbol": sym})
+
     try:
         async with aiohttp.ClientSession() as session:
-            return await _post(session, "/api/mt5/order", body)
+            try:
+                return await _try_order(session, mt5_sym)
+            except aiohttp.ClientResponseError as e:
+                # BTC-style symbols don't use the suffix — retry with bare symbol on 404
+                if e.status == 404 and MT5_SYMBOL_SUFFIX and mt5_sym.upper().endswith(MT5_SYMBOL_SUFFIX.upper()):
+                    bare = mt5_sym[:-len(MT5_SYMBOL_SUFFIX)]
+                    logger.info("Order 404 for %s, retrying bare symbol %s", mt5_sym, bare)
+                    return await _try_order(session, bare)
+                raise
     except Exception as e:
         logger.error("place_order %s %s failed: %s", direction, symbol, e)
         return {"success": False, "error": str(e)}
