@@ -689,8 +689,13 @@ async def modify_position(request: dict):
     # Enforce MT5 minimum stop distance so we never send an invalid stop
     sym_info = mt5.symbol_info(mt5_sym)
     tick = mt5.symbol_info_tick(mt5_sym)
-    if sym_info and tick and sym_info.trade_stops_level > 0:
+    if sym_info and tick:
         min_dist = sym_info.trade_stops_level * sym_info.point
+        if min_dist == 0:
+            # Broker sets stop_level=0 — fall back to freeze_level or spread × 3
+            freeze = sym_info.trade_freeze_level * sym_info.point
+            spread_dist = sym_info.spread * sym_info.point * 3
+            min_dist = max(freeze, spread_dist, sym_info.point * 10)
         current_price = tick.bid if pos.type == 0 else tick.ask  # BUY→bid, SELL→ask
         if pos.type == 0:  # BUY: SL must be below price
             new_sl = min(new_sl, current_price - min_dist)

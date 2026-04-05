@@ -14,6 +14,7 @@ from config import (
     BREAKEVEN_TRIGGER_PIPS,
     TRAILING_TRIGGER_PIPS,
     TRAILING_OFFSET_PIPS,
+    TRAILING_OFFSET_BY_SYMBOL,
     PIP_SIZE,
 )
 from database import get_open_trades, close_trade, create_audit_log, update_trade_sl
@@ -54,7 +55,7 @@ def _new_trailing_sl(
     symbol: str,
 ) -> float:
     pip = PIP_SIZE.get(symbol, 0.0001)
-    offset = TRAILING_OFFSET_PIPS * pip
+    offset = TRAILING_OFFSET_BY_SYMBOL.get(symbol, TRAILING_OFFSET_PIPS) * pip
     if direction == "BUY":
         return current_price - offset
     else:

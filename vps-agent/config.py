@@ -124,7 +124,12 @@ MIN_CONFIDENCE_TO_SIGNAL: int   = 50    # Write to DB even if not trading
 # ─── Trade management (breakeven / trailing) ─────────────────────────────────
 BREAKEVEN_TRIGGER_PIPS: float   = 20.0  # move SL to entry after this many pips profit
 TRAILING_TRIGGER_PIPS: float    = 40.0  # trail SL after this many pips profit
-TRAILING_OFFSET_PIPS: float     = 10.0  # trail SL this many pips behind entry
+TRAILING_OFFSET_PIPS: float     = 10.0  # trail SL this many pips behind price (default)
+# Per-symbol overrides — BTC/Gold need larger buffers due to spread & broker stop levels
+TRAILING_OFFSET_BY_SYMBOL: dict[str, float] = {
+    "BTC/USD": 100,  # $100 buffer — BTC minimum stop level is large on most brokers
+    "XAU/USD": 50,   # 50 pip ($5) buffer for gold
+}
 
 # Pip size per symbol (used for profit/pips calculations)
 PIP_SIZE: dict[str, float] = {
