@@ -609,10 +609,10 @@ def _close_single_position(position) -> dict:
     close_type = mt5.ORDER_TYPE_SELL if position.type == 0 else mt5.ORDER_TYPE_BUY
     close_price = tick.bid if position.type == 0 else tick.ask
 
-    filling_type = symbol_info.filling_mode
-    if filling_type == mt5.SYMBOL_FILLING_FOK:
+    filling_mode = symbol_info.filling_mode
+    if filling_mode & 1:
         type_filling = mt5.ORDER_FILLING_FOK
-    elif filling_type == mt5.SYMBOL_FILLING_IOC:
+    elif filling_mode & 2:
         type_filling = mt5.ORDER_FILLING_IOC
     else:
         type_filling = mt5.ORDER_FILLING_RETURN
@@ -656,6 +656,65 @@ def _close_single_position(position) -> dict:
             "error": error_msg,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+
+@app.post("/api/mt5/modify")
+async def modify_position(request: dict):
+    """Modify stop loss and/or take profit on an open position."""
+    ensure_mt5()
+
+    ticket = int(request.get("ticket", 0))
+    symbol = request.get("symbol", "")
+    new_sl = float(request.get("sl", 0))
+    new_tp = float(request.get("tp", 0))
+
+    if not ticket:
+        raise HTTPException(status_code=400, detail="ticket is required")
+
+    mt5_sym = mt5_symbol(symbol) if symbol else None
+
+    # Look up the position to get current TP if not provided
+    positions = mt5.positions_get(ticket=ticket)
+    if not positions:
+        raise HTTPException(status_code=404, detail=f"Position #{ticket} not found")
+
+    pos = positions[0]
+    if not mt5_sym:
+        mt5_sym = pos.symbol
+
+    # Use existing TP if caller didn't supply one
+    if new_tp == 0:
+        new_tp = pos.tp
+
+    request_dict = {
+        "action":   mt5.TRADE_ACTION_SLTP,
+        "symbol":   mt5_sym,
+        "position": ticket,
+        "sl":       new_sl,
+        "tp":       new_tp,
+    }
+
+    result = mt5.order_send(request_dict)
+
+    if result is None:
+        error = mt5.last_error()
+        return {"success": False, "error": f"order_send returned None: {error}"}
+
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        return {
+            "success": False,
+            "error": f"Modify failed: {result.retcode} - {result.comment}",
+            "retcode": result.retcode,
+        }
+
+    logger.info(f"Position #{ticket} modified: SL={new_sl} TP={new_tp}")
+    return {
+        "success":   True,
+        "ticket":    ticket,
+        "sl":        new_sl,
+        "tp":        new_tp,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.get("/api/mt5/symbols")
