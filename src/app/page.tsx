@@ -355,6 +355,32 @@ function AuditRow({ log }: { log: AuditLog }) {
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
+// All pairs the agent supports — shown as toggles in the watch list
+const ALL_SYMBOLS = [
+  'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF',
+  'XAU/USD', 'BTC/USD', 'AUD/USD', 'NZD/USD',
+  'USD/CAD', 'GBP/JPY', 'EUR/JPY', 'EUR/GBP',
+];
+
+// Normalise any DB symbol format to canonical (EUR/USD)
+function normalizeWatchSym(raw: string): string {
+  const map: Record<string, string> = {
+    'EURUSD=X': 'EUR/USD', 'EURUSD': 'EUR/USD',
+    'GBPUSD=X': 'GBP/USD', 'GBPUSD': 'GBP/USD',
+    'USDJPY=X': 'USD/JPY', 'USDJPY': 'USD/JPY',
+    'USDCHF=X': 'USD/CHF', 'USDCHF': 'USD/CHF',
+    'XAUUSD=X': 'XAU/USD', 'XAUUSD': 'XAU/USD', 'GC=F': 'XAU/USD',
+    'BTCUSD=X': 'BTC/USD', 'BTCUSD': 'BTC/USD', 'BTC-USD': 'BTC/USD',
+    'AUDUSD=X': 'AUD/USD', 'AUDUSD': 'AUD/USD',
+    'NZDUSD=X': 'NZD/USD', 'NZDUSD': 'NZD/USD',
+    'USDCAD=X': 'USD/CAD', 'USDCAD': 'USD/CAD',
+    'GBPJPY=X': 'GBP/JPY', 'GBPJPY': 'GBP/JPY',
+    'EURJPY=X': 'EUR/JPY', 'EURJPY': 'EUR/JPY',
+    'EURGBP=X': 'EUR/GBP', 'EURGBP': 'EUR/GBP',
+  };
+  return map[raw.toUpperCase()] ?? raw;
+}
+
 export default function Dashboard() {
   const [agent, setAgent] = useState<AgentState | null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -440,7 +466,22 @@ export default function Dashboard() {
     .filter(t => t.status === 'CLOSED' && t.closeTime && new Date(t.closeTime) > new Date(Date.now() - 86400000))
     .reduce((s, t) => s + (t.pnl ?? 0), 0);
 
-  const watchList = agent?.watchSymbols?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
+  const watchList = (agent?.watchSymbols ?? '')
+    .split(',').map(s => normalizeWatchSym(s.trim())).filter(Boolean);
+  const watchSet = new Set(watchList);
+
+  const toggleWatchSymbol = async (sym: string) => {
+    if (!agent) return;
+    const next = watchSet.has(sym)
+      ? watchList.filter(s => s !== sym)
+      : [...watchList, sym];
+    const res = await fetch('/api/forex/agent', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ watchSymbols: next.join(',') }),
+    });
+    if (res.ok) setAgent((await res.json()).state);
+  };
 
   // Symbols that have signals
   const signalSymbols = [...new Set(signals.map(s => s.symbol))];
@@ -602,33 +643,45 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Watch list */}
-          {watchList.length > 0 && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-3">
+          {/* Watch list — interactive toggles */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
                 <Shield size={13} className="text-slate-500" />
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Watch List</span>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {watchList.map(sym => {
-                  const clean = sym.replace('=X', '');
-                  const sig = signals.find(s =>
-                    s.symbol === sym || s.symbol === clean || s.symbol.replace('/', '') === clean
-                  );
-                  const dir = sig?.direction;
-                  return (
-                    <span key={sym} className={`text-xs px-2.5 py-1 rounded-lg border font-mono font-semibold ${
-                      dir === 'BUY' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                      : dir === 'SELL' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                      : 'bg-slate-800 border-slate-700 text-slate-400'
-                    }`}>
-                      {clean}
-                    </span>
-                  );
-                })}
-              </div>
+              <span className="text-xs text-slate-600">{watchList.length} active</span>
             </div>
-          )}
+            <div className="grid grid-cols-2 gap-1.5">
+              {ALL_SYMBOLS.map(sym => {
+                const active = watchSet.has(sym);
+                const sig = signals.find(s => s.symbol === sym);
+                const dir = sig?.direction;
+                return (
+                  <button
+                    key={sym}
+                    onClick={() => toggleWatchSymbol(sym)}
+                    className={`text-xs px-2 py-1.5 rounded-lg border font-mono font-semibold text-left transition-all ${
+                      !active
+                        ? 'bg-slate-800/40 border-slate-700/50 text-slate-600 hover:text-slate-400 hover:border-slate-600'
+                        : dir === 'BUY'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                        : dir === 'SELL'
+                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
+                        : 'bg-slate-700/50 border-slate-600 text-slate-300 hover:bg-slate-700'
+                    }`}
+                    title={active ? `Remove ${sym} from watch list` : `Add ${sym} to watch list`}
+                  >
+                    <span className={`mr-1 ${active ? 'opacity-100' : 'opacity-30'}`}>
+                      {active ? '●' : '○'}
+                    </span>
+                    {sym}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-slate-700 mt-2">Click to add/remove from scan</p>
+          </div>
         </div>
 
         {/* ── Middle: Signals / News tabs ── */}
