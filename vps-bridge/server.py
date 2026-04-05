@@ -422,6 +422,7 @@ async def get_history(
             "comment": d.comment or "",
             "magic": d.magic if hasattr(d, "magic") else 0,
             "position_id": int(d.position_id) if hasattr(d, "position_id") else 0,
+            "entry_type": int(d.entry) if hasattr(d, "entry") else 0,  # 0=IN, 1=OUT, 2=INOUT
             "time": int(d.time),
             "time_str": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
         })

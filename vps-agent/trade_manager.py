@@ -98,6 +98,13 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
 
             # Try to get actual close price + P&L from MT5 deal history
             mt5_ticket = int(trade.get("mt5Ticket") or 0)
+            # Fallback: parse ticket from notes if mt5Ticket column is NULL (pre-migration trades)
+            if not mt5_ticket and trade.get("notes"):
+                import re
+                m = re.search(r'MT5 ticket=(\d+)', trade.get("notes", ""))
+                if m:
+                    mt5_ticket = int(m.group(1))
+                    logger.info("Parsed mt5_ticket=%s from notes for trade %s", mt5_ticket, trade_id[:8])
             if mt5_ticket:
                 try:
                     deal = await fetch_deal_by_position(mt5_ticket)

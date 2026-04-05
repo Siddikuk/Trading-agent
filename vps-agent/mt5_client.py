@@ -334,13 +334,14 @@ async def fetch_deal_by_position(position_ticket: int, lookback_days: int = 3) -
         async with aiohttp.ClientSession() as session:
             data = await _get(session, "/api/mt5/history", {"days": lookback_days})
             deals = data.get("deals", [])
-            # Find the EXIT deal for this position (entry_type=1 means exit/out)
-            for deal in deals:
-                if int(deal.get("position_id", 0)) == position_ticket:
-                    # entry_type 1 = OUT (closing deal), 0 = IN (opening deal)
-                    # We want the closing deal — it has the actual profit
-                    if deal.get("profit", 0) != 0 or deal.get("comment", ""):
-                        return deal
+            # Prefer entry_type=1 (OUT/closing deal) — this has the actual profit/loss
+            closing = [
+                d for d in deals
+                if int(d.get("position_id", 0)) == position_ticket
+                and d.get("entry_type", -1) == 1
+            ]
+            if closing:
+                return closing[-1]
             # Fallback: return the last deal matching the position regardless of type
             matches = [d for d in deals if int(d.get("position_id", 0)) == position_ticket]
             return matches[-1] if matches else None
