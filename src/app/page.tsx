@@ -393,6 +393,7 @@ export default function Dashboard() {
   const [toggling, setToggling] = useState(false);
   const [midTab, setMidTab] = useState<'signals' | 'news'>('signals');
   const [filterSymbol, setFilterSymbol] = useState<string | null>(null);
+  const [signalsRefreshedAt, setSignalsRefreshedAt] = useState<Date | null>(null);
   const _lastRefresh = useRef(Date.now());
 
   const countdown = useCountdown(agent?.lastScanAt ?? null);
@@ -403,12 +404,15 @@ export default function Dashboard() {
     try {
       const [agentRes, sigRes, tradeRes, auditRes] = await Promise.allSettled([
         fetch('/api/forex/agent').then(r => r.json()),
-        fetch('/api/forex/db-signals').then(r => r.json()),
+        fetch('/api/forex/db-signals', { cache: 'no-store' }).then(r => r.json()),
         fetch('/api/forex/trades').then(r => r.json()),
         fetch('/api/forex/audit').then(r => r.json()),
       ]);
       if (agentRes.status === 'fulfilled' && agentRes.value?.state) setAgent(agentRes.value.state);
-      if (sigRes.status === 'fulfilled' && sigRes.value?.signals) setSignals(sigRes.value.signals);
+      if (sigRes.status === 'fulfilled' && sigRes.value?.signals) {
+        setSignals(sigRes.value.signals);
+        setSignalsRefreshedAt(new Date());
+      }
       if (tradeRes.status === 'fulfilled' && tradeRes.value?.trades) setTrades(tradeRes.value.trades);
       if (auditRes.status === 'fulfilled' && auditRes.value?.logs) setAudit(auditRes.value.logs);
       _lastRefresh.current = Date.now();
@@ -728,6 +732,11 @@ export default function Dashboard() {
           {/* Signals tab */}
           {midTab === 'signals' && (
             <div>
+              {signalsRefreshedAt && (
+                <p className="text-[10px] text-slate-600 mb-2">
+                  Updated {signalsRefreshedAt.toLocaleTimeString()}
+                </p>
+              )}
               {/* Symbol filter */}
               {signalSymbols.length > 1 && (
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
