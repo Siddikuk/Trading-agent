@@ -11,7 +11,7 @@ from typing import Optional
 
 from config import (
     LOT_STEP, MIN_LOT, MAX_LOT,
-    PIP_SIZE,
+    PIP_SIZE, PIP_VALUE_PER_LOT,
     DEFAULT_MAX_RISK_PCT,
     DEFAULT_DAILY_RISK_LIMIT_PCT,
     DEFAULT_MAX_DRAWDOWN_PCT,
@@ -63,7 +63,7 @@ def calc_position_size(
         return MIN_LOT
 
     pip = PIP_SIZE.get(symbol, 0.0001)
-    pip_value_per_lot = 10.0  # simplified: ~$10/pip per standard lot for USD pairs
+    pip_value_per_lot = PIP_VALUE_PER_LOT.get(symbol, 10.0)
 
     risk_amount = balance * (risk_pct / 100.0)
     pips_at_risk = sl_distance / pip

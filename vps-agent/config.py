@@ -147,6 +147,25 @@ PIP_SIZE: dict[str, float] = {
     "BTC/USD": 1.0,     # Bitcoin — 1 pip = $1
 }
 
+# Dollar value of 1 pip for 1 standard lot, per symbol
+# EUR/USD: 100,000 × 0.0001 = $10/pip/lot
+# XAU/USD: 100 oz × $0.10/pip = $10/pip/lot
+# BTC/USD: 1 BTC × $1/pip = $1/pip/lot
+PIP_VALUE_PER_LOT: dict[str, float] = {
+    "EUR/USD": 10.0,
+    "GBP/USD": 10.0,
+    "AUD/USD": 10.0,
+    "NZD/USD": 10.0,
+    "USD/CAD": 10.0,
+    "USD/CHF": 10.0,
+    "EUR/GBP": 10.0,
+    "USD/JPY": 9.5,   # approximate — varies with rate
+    "GBP/JPY": 9.5,
+    "EUR/JPY": 9.5,
+    "XAU/USD": 10.0,  # 100 oz × $0.10/pip
+    "BTC/USD": 1.0,   # 1 BTC × $1/pip
+}
+
 # ─── Claude reasoning ─────────────────────────────────────────────────────────
 MAX_CONCURRENT_CLAUDE: int  = int(os.getenv("AGENT_MAX_CONCURRENT_CLAUDE", "2"))
 CLAUDE_RETRY_ATTEMPTS: int  = 3
