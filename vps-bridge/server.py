@@ -490,14 +490,13 @@ async def place_order(request: dict):
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
 
-    # Try different filling modes
-    filling_type = mt5.symbol_info(mt5_sym).filling_mode
-    if filling_type == mt5.SYMBOL_FILLING_FOK:
+    # filling_mode is a bitmask: bit0=FOK supported, bit1=IOC supported
+    filling_mode = symbol_info.filling_mode
+    if filling_mode & 1:
         request_dict["type_filling"] = mt5.ORDER_FILLING_FOK
-    elif filling_type == mt5.SYMBOL_FILLING_IOC:
+    elif filling_mode & 2:
         request_dict["type_filling"] = mt5.ORDER_FILLING_IOC
     else:
-        # Try RETURN mode as fallback
         request_dict["type_filling"] = mt5.ORDER_FILLING_RETURN
 
     result = mt5.order_send(request_dict)
