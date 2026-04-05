@@ -15,6 +15,7 @@ from config import (
     TIMEFRAMES,
     MAX_CONCURRENT_CLAUDE,
     MIN_CONFIDENCE_TO_SIGNAL,
+    MIN_TF_CONFLUENCE,
     ENTRY_TIMEFRAME,
 )
 from database import (
@@ -160,9 +161,27 @@ async def run_cycle() -> dict:
         if should_run_claude(mtf):
             candidates.append((sym, mtf))
         else:
-            logger.info("Skip %s: confluence too low (%d/%d)",
-                        sym, mtf.confluence_count, mtf.total_tfs)
+            reason = (
+                f"Confluence too low: {mtf.confluence_count}/{mtf.total_tfs} TFs agree"
+                if mtf.confluence_count < MIN_TF_CONFLUENCE
+                else f"Mixed signals: {mtf.confluence_count}/{mtf.total_tfs} TFs split — no clear direction"
+            )
+            logger.info("Skip %s: %s", sym, reason)
             summary["symbols_skipped"] += 1
+            # Write a HOLD signal so dashboard shows fresh data every scan
+            entry_ind = mtf.tf_signals.get(ENTRY_TIMEFRAME)
+            snap = dict(entry_ind.indicators) if entry_ind else {}
+            snap["confluence"] = mtf.confluence_count
+            snap["confluence_dir"] = mtf.confluence_direction
+            snap["skip_reason"] = reason
+            snap["reasoning"] = f"Pre-filter skipped: {reason}. Mechanical confidence {mtf.mechanical_confidence:.0f}%."
+            create_signal(
+                symbol=sym, direction="HOLD",
+                confidence=mtf.mechanical_confidence,
+                entry_price=None, stop_loss=None, take_profit=None,
+                strategy="AI-MTF", timeframe=timeframe,
+                indicators=snap, executed=False,
+            )
 
     summary["symbols_scanned"] = len(candidates)
 
