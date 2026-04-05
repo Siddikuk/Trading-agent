@@ -19,9 +19,11 @@ $NssmPath   = Join-Path $RepoRoot "nssm.exe"
 $LogDir     = Join-Path $RepoRoot "logs"
 
 # ── Detect Python ─────────────────────────────────────────────────────────────
-$Python = (Get-Command python -ErrorAction SilentlyContinue)?.Source
+$PyCmd = Get-Command python -ErrorAction SilentlyContinue
+if ($PyCmd) { $Python = $PyCmd.Source } else { $Python = $null }
 if (-not $Python) {
-    $Python = (Get-Command python3 -ErrorAction SilentlyContinue)?.Source
+    $PyCmd = Get-Command python3 -ErrorAction SilentlyContinue
+    if ($PyCmd) { $Python = $PyCmd.Source } else { $Python = $null }
 }
 if (-not $Python) {
     Write-Error "Python not found. Make sure Python is installed and on PATH."
