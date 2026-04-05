@@ -212,6 +212,15 @@ def close_trade(
     logger.info("Trade closed: %s exit=%.5f pnl=%.2f", trade_id[:8], exit_price, pnl)
 
 
+def update_trade_sl(trade_id: str, new_sl: float) -> None:
+    """Update the stop loss on an open trade record."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "Trade" SET "stopLoss" = %s WHERE id = %s
+            """, (new_sl, trade_id))
+
+
 def get_daily_pnl() -> float:
     """Sum of PnL for all trades closed in the last 24 hours."""
     with _conn() as conn:

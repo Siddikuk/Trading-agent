@@ -16,7 +16,7 @@ from config import (
     TRAILING_OFFSET_PIPS,
     PIP_SIZE,
 )
-from database import get_open_trades, close_trade, create_audit_log
+from database import get_open_trades, close_trade, create_audit_log, update_trade_sl
 from mt5_client import modify_position_sl, fetch_quotes
 
 logger = logging.getLogger(__name__)
@@ -147,12 +147,16 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
                 )
                 result = await modify_position_sl(matched_ticket, symbol, be_sl, current_tp)
                 if result.get("success"):
+                    current_sl = be_sl  # update in memory for trailing check below
+                    update_trade_sl(trade_id, be_sl)
                     create_audit_log("BREAKEVEN_SL_MOVE", symbol, {
                         "trade_id": trade_id,
                         "old_sl": current_sl,
                         "new_sl": be_sl,
                         "pips_profit": pips_profit,
                     })
+                else:
+                    logger.warning("Breakeven SL move failed %s: %s", symbol, result.get("error"))
 
         # ── 3. Trailing stop ─────────────────────────────────────────────────
         if pips_profit >= TRAILING_TRIGGER_PIPS:
@@ -170,12 +174,15 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
                 )
                 result = await modify_position_sl(matched_ticket, symbol, trail_sl, current_tp)
                 if result.get("success"):
+                    update_trade_sl(trade_id, trail_sl)
                     create_audit_log("TRAILING_SL_MOVE", symbol, {
                         "trade_id": trade_id,
                         "old_sl": current_sl,
                         "new_sl": trail_sl,
                         "pips_profit": pips_profit,
                     })
+                else:
+                    logger.warning("Trailing SL move failed %s: %s", symbol, result.get("error"))
 
 
 def _find_mt5_ticket(trade: dict, mt5_positions: list[dict]) -> Optional[int]:
