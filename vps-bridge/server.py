@@ -168,11 +168,37 @@ def ensure_mt5() -> bool:
 
 
 def mt5_symbol(symbol: str) -> str:
-    """Convert app symbol format (EUR/USD) to MT5 format (EURUSD)."""
+    """Convert app symbol format (EUR/USD) to bare MT5 format (EURUSD)."""
     return symbol.replace("/", "").replace("-", "").upper()
 
 
+_BROKER_SUFFIXES = ('', '+', '.r', '.raw', '.std', '.m', '.pro', '.ecn', '.stp', '.sp', '.i', '.c', '.t', '.n')
+_symbol_cache: dict[str, str] = {}  # bare → resolved MT5 symbol name
+
+def resolve_mt5_symbol(bare: str) -> Optional[str]:
+    """Auto-discover the broker's MT5 symbol name by trying common suffixes.
+    Cached after first discovery so subsequent calls are instant."""
+    bare = bare.upper()
+    if bare in _symbol_cache:
+        return _symbol_cache[bare]
+    for sfx in _BROKER_SUFFIXES:
+        candidate = bare + sfx
+        info = mt5.symbol_info(candidate)
+        if info is not None:
+            mt5.symbol_select(candidate, True)  # ensure visible in Market Watch
+            _symbol_cache[bare] = candidate
+            return candidate
+    return None
+
+
 # ==================== API ROUTES ====================
+
+@app.post("/api/mt5/clear-symbol-cache")
+async def clear_symbol_cache():
+    """Clear the broker symbol cache. Call this after switching MT5 accounts."""
+    _symbol_cache.clear()
+    return {"success": True, "message": "Symbol cache cleared"}
+
 
 @app.get("/api/mt5/health")
 async def health_check():
@@ -303,7 +329,9 @@ async def get_candles(
     if mt5_tf not in TIMEFRAME_MAP:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}. Use: {list(APP_TIMEFRAME_MAP.keys())}")
 
-    mt5_symbol_name = mt5_symbol(symbol)
+    mt5_symbol_name = resolve_mt5_symbol(mt5_symbol(symbol))
+    if not mt5_symbol_name:
+        raise HTTPException(status_code=404, detail=f"Symbol {symbol} not found in MT5")
 
     try:
         rates = mt5.copy_rates_from_pos(mt5_symbol_name, TIMEFRAME_MAP[mt5_tf], 0, count)
@@ -456,10 +484,10 @@ async def place_order(request: dict):
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol is required")
 
-    mt5_sym = mt5_symbol(symbol)
+    mt5_sym = resolve_mt5_symbol(mt5_symbol(symbol))
+    if not mt5_sym:
+        raise HTTPException(status_code=404, detail=f"Symbol {symbol} not found in MT5")
     symbol_info = mt5.symbol_info(mt5_sym)
-    if not symbol_info:
-        raise HTTPException(status_code=404, detail=f"Symbol {mt5_sym} not found in MT5")
 
     # Validate lot size
     lots = max(symbol_info.volume_min, min(symbol_info.volume_max, lots))

@@ -19,8 +19,6 @@ from config import (
     BRIDGE_RETRY_LIMIT,
     TIMEFRAMES,
     TF_CANDLE_COUNT,
-    MT5_SYMBOL_SUFFIX,
-    to_mt5_symbol,
     from_mt5_symbol,
     WATCH_SYMBOLS,
 )
@@ -193,21 +191,12 @@ async def _fetch_candles_one(
     timeframe: str,
     count: int,
 ) -> list[Candle]:
-    mt5_sym = to_mt5_symbol(symbol)
-    params = {"symbol": mt5_sym, "timeframe": timeframe, "count": count}
+    bare = symbol.replace("/", "")  # bridge auto-discovers the suffix
+    params = {"symbol": bare, "timeframe": timeframe, "count": count}
     try:
         data = await _get(session, "/api/mt5/candles", params)
         return _parse_candles(data.get("candles", []))
     except Exception as e:
-        # If suffix was applied and failed, retry without it (e.g. BTCUSD on Vantage has no +)
-        if MT5_SYMBOL_SUFFIX and mt5_sym.upper().endswith(MT5_SYMBOL_SUFFIX.upper()):
-            bare = mt5_sym[:-len(MT5_SYMBOL_SUFFIX)]
-            try:
-                data = await _get(session, "/api/mt5/candles", {**params, "symbol": bare})
-                return _parse_candles(data.get("candles", []))
-            except Exception as e2:
-                logger.warning("Candle fetch failed %s/%s: %s", symbol, timeframe, e2)
-                return []
         logger.warning("Candle fetch failed %s/%s: %s", symbol, timeframe, e)
         return []
 
@@ -254,7 +243,7 @@ async def fetch_quotes(symbols: list[str] | None = None) -> dict[str, dict]:
     """Return current bid/ask/last for each symbol."""
     if symbols is None:
         symbols = WATCH_SYMBOLS
-    mt5_syms = ",".join(to_mt5_symbol(s) for s in symbols)
+    mt5_syms = ",".join(s.replace("/", "") for s in symbols)  # bridge auto-discovers suffix
     try:
         async with aiohttp.ClientSession() as session:
             data = await _get(session, "/api/mt5/quotes", {"symbols": mt5_syms})
@@ -282,11 +271,11 @@ async def place_order(
     Place a market order via the MT5 bridge.
     Returns bridge response dict with 'success', 'ticket', 'price'.
     """
-    mt5_sym  = to_mt5_symbol(symbol)
+    bare = symbol.replace("/", "")  # bridge auto-discovers the suffix
     order_type = 0 if direction == "BUY" else 1
 
     body = {
-        "symbol":    mt5_sym,
+        "symbol":    bare,
         "type":      order_type,
         "lots":      lots,
         "price":     0,          # 0 = market order
@@ -296,20 +285,9 @@ async def place_order(
         "deviation": 20,
     }
 
-    async def _try_order(sess, sym):
-        return await _post(sess, "/api/mt5/order", {**body, "symbol": sym})
-
     try:
         async with aiohttp.ClientSession() as session:
-            try:
-                return await _try_order(session, mt5_sym)
-            except aiohttp.ClientResponseError as e:
-                # BTC-style symbols don't use the suffix — retry with bare symbol on 404
-                if e.status == 404 and MT5_SYMBOL_SUFFIX and mt5_sym.upper().endswith(MT5_SYMBOL_SUFFIX.upper()):
-                    bare = mt5_sym[:-len(MT5_SYMBOL_SUFFIX)]
-                    logger.info("Order 404 for %s, retrying bare symbol %s", mt5_sym, bare)
-                    return await _try_order(session, bare)
-                raise
+            return await _post(session, "/api/mt5/order", body)
     except Exception as e:
         logger.error("place_order %s %s failed: %s", direction, symbol, e)
         return {"success": False, "error": str(e)}
@@ -372,7 +350,7 @@ async def modify_position_sl(
     The bridge endpoint /api/mt5/modify handles this.
     Falls back to using order with TRADE_ACTION_SLTP.
     """
-    mt5_sym = to_mt5_symbol(symbol)
+    mt5_sym = symbol.replace("/", "")  # bridge auto-discovers the suffix
     body = {
         "ticket":     ticket,
         "symbol":     mt5_sym,
