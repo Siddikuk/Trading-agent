@@ -148,7 +148,7 @@ def check_confidence_and_rr(confidence: float, risk_reward: float) -> RiskCheck:
             False,
             f"Confidence {confidence:.0f}% < minimum {MIN_CONFIDENCE_TO_TRADE}%"
         )
-    if risk_reward < MIN_RISK_REWARD:
+    if risk_reward < MIN_RISK_REWARD - 0.005:  # epsilon avoids float precision rejects at exactly 2.0
         return RiskCheck(
             False,
             f"R:R {risk_reward:.2f} < minimum {MIN_RISK_REWARD}"

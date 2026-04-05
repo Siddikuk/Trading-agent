@@ -48,9 +48,14 @@ WATCH_SYMBOLS: list[str] = [
 # Broker suffixes stripped when converting MT5 symbol → canonical
 _MT5_SUFFIXES = ('+', '.std', '.raw', '.r', '.m', '.i', '.pro', '.ecn', '-e', '.stp', '.t', '.n', '.c', '.sp')
 
+# Suffix appended when sending symbols TO the MT5 bridge (broker-specific)
+# Vantage Markets: set MT5_SYMBOL_SUFFIX=+ in .env
+# RoboForex, IC Markets, most others: leave empty
+MT5_SYMBOL_SUFFIX: str = os.getenv("MT5_SYMBOL_SUFFIX", "")
+
 # MT5 uses no slash; bridge expects this format
 def to_mt5_symbol(symbol: str) -> str:
-    return symbol.replace("/", "")
+    return symbol.replace("/", "") + MT5_SYMBOL_SUFFIX
 
 def from_mt5_symbol(mt5_sym: str) -> str:
     """Convert any broker MT5 symbol to canonical display form (e.g. EUR/USD)."""
