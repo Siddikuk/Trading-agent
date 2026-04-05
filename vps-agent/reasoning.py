@@ -77,7 +77,7 @@ You analyse markets using a top-down multi-timeframe approach and make precise, 
 
 ## Response Format
 Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
-{
+{{
   "direction": "BUY" | "SELL" | "HOLD",
   "confidence": <integer 0-100>,
   "entry_price": <float>,
@@ -90,7 +90,7 @@ Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
   "primary_timeframe": "<which TF drove the entry decision>",
   "confluence_used": "<e.g. '3/4'>",
   "risk_reward": <float>
-}"""
+}}"""
 
 
 # ─── Prompt builder ───────────────────────────────────────────────────────────
