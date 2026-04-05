@@ -707,6 +707,11 @@ export default function Dashboard() {
                   {signals.length}
                 </span>
               )}
+              {signalsRefreshedAt && (
+                <span className="text-[10px] text-slate-400 font-normal">
+                  {signalsRefreshedAt.toLocaleTimeString()}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setMidTab('news')}
@@ -732,11 +737,6 @@ export default function Dashboard() {
           {/* Signals tab */}
           {midTab === 'signals' && (
             <div>
-              {signalsRefreshedAt && (
-                <p className="text-[10px] text-slate-600 mb-2">
-                  Updated {signalsRefreshedAt.toLocaleTimeString()}
-                </p>
-              )}
               {/* Symbol filter */}
               {signalSymbols.length > 1 && (
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
