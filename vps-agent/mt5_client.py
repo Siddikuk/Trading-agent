@@ -19,6 +19,7 @@ from config import (
     BRIDGE_RETRY_LIMIT,
     TIMEFRAMES,
     TF_CANDLE_COUNT,
+    MT5_SYMBOL_SUFFIX,
     to_mt5_symbol,
     from_mt5_symbol,
     WATCH_SYMBOLS,
@@ -193,15 +194,20 @@ async def _fetch_candles_one(
     count: int,
 ) -> list[Candle]:
     mt5_sym = to_mt5_symbol(symbol)
+    params = {"symbol": mt5_sym, "timeframe": timeframe, "count": count}
     try:
-        data = await _get(session, "/api/mt5/candles", {
-            "symbol": mt5_sym,
-            "timeframe": timeframe,
-            "count": count,
-        })
-        raw = data.get("candles", [])
-        return _parse_candles(raw)
+        data = await _get(session, "/api/mt5/candles", params)
+        return _parse_candles(data.get("candles", []))
     except Exception as e:
+        # If suffix was applied and failed, retry without it (e.g. BTCUSD on Vantage has no +)
+        if MT5_SYMBOL_SUFFIX and mt5_sym.upper().endswith(MT5_SYMBOL_SUFFIX.upper()):
+            bare = mt5_sym[:-len(MT5_SYMBOL_SUFFIX)]
+            try:
+                data = await _get(session, "/api/mt5/candles", {**params, "symbol": bare})
+                return _parse_candles(data.get("candles", []))
+            except Exception as e2:
+                logger.warning("Candle fetch failed %s/%s: %s", symbol, timeframe, e2)
+                return []
         logger.warning("Candle fetch failed %s/%s: %s", symbol, timeframe, e)
         return []
 

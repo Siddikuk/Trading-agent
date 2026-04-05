@@ -210,6 +210,10 @@ async def run_cycle() -> dict:
         )
         indicators_snapshot["confluence"] = mtf.confluence_count
         indicators_snapshot["confluence_dir"] = mtf.confluence_direction
+        # Include Claude's reasoning so the dashboard can display it
+        indicators_snapshot["reasoning"]   = decision.reasoning
+        indicators_snapshot["skip_reason"] = decision.skip_reason
+        indicators_snapshot["risk_reward"] = decision.risk_reward
 
         # Write signal regardless of trade decision (for dashboard visibility)
         if decision.confidence >= MIN_CONFIDENCE_TO_SIGNAL:
