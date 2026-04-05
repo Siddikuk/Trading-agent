@@ -389,12 +389,10 @@ export default function Dashboard() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [justRefreshed, setJustRefreshed] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [midTab, setMidTab] = useState<'signals' | 'news'>('signals');
   const [filterSymbol, setFilterSymbol] = useState<string | null>(null);
-  const [signalsRefreshedAt, setSignalsRefreshedAt] = useState<Date | null>(null);
   const _lastRefresh = useRef(Date.now());
 
   const countdown = useCountdown(agent?.lastScanAt ?? null);
@@ -405,20 +403,15 @@ export default function Dashboard() {
     try {
       const [agentRes, sigRes, tradeRes, auditRes] = await Promise.allSettled([
         fetch('/api/forex/agent').then(r => r.json()),
-        fetch('/api/forex/db-signals', { cache: 'no-store' }).then(r => r.json()),
+        fetch('/api/forex/db-signals').then(r => r.json()),
         fetch('/api/forex/trades').then(r => r.json()),
         fetch('/api/forex/audit').then(r => r.json()),
       ]);
       if (agentRes.status === 'fulfilled' && agentRes.value?.state) setAgent(agentRes.value.state);
-      if (sigRes.status === 'fulfilled' && sigRes.value?.signals) {
-        setSignals(sigRes.value.signals);
-        setSignalsRefreshedAt(new Date());
-      }
+      if (sigRes.status === 'fulfilled' && sigRes.value?.signals) setSignals(sigRes.value.signals);
       if (tradeRes.status === 'fulfilled' && tradeRes.value?.trades) setTrades(tradeRes.value.trades);
       if (auditRes.status === 'fulfilled' && auditRes.value?.logs) setAudit(auditRes.value.logs);
       _lastRefresh.current = Date.now();
-      setJustRefreshed(true);
-      setTimeout(() => setJustRefreshed(false), 1500);
     } finally {
       setLoading(false);
       if (!silent) setRefreshing(false);
@@ -554,8 +547,7 @@ export default function Dashboard() {
             <button
               onClick={() => fetchAll(false)}
               disabled={refreshing}
-              className="p-2 rounded-lg transition-colors text-slate-500 hover:text-white hover:bg-slate-800"
-              style={justRefreshed ? { color: '#4ade80', backgroundColor: 'rgba(74,222,128,0.1)' } : undefined}
+              className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
               title="Refresh"
             >
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
@@ -709,11 +701,6 @@ export default function Dashboard() {
               {signals.length > 0 && (
                 <span className={`text-[10px] px-1.5 rounded-full ${midTab === 'signals' ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-700 text-slate-500'}`}>
                   {signals.length}
-                </span>
-              )}
-              {signalsRefreshedAt && (
-                <span className="text-[10px] text-slate-400 font-normal">
-                  {signalsRefreshedAt.toLocaleTimeString()}
                 </span>
               )}
             </button>
