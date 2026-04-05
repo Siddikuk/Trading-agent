@@ -389,6 +389,7 @@ export default function Dashboard() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [justRefreshed, setJustRefreshed] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [midTab, setMidTab] = useState<'signals' | 'news'>('signals');
@@ -416,6 +417,8 @@ export default function Dashboard() {
       if (tradeRes.status === 'fulfilled' && tradeRes.value?.trades) setTrades(tradeRes.value.trades);
       if (auditRes.status === 'fulfilled' && auditRes.value?.logs) setAudit(auditRes.value.logs);
       _lastRefresh.current = Date.now();
+      setJustRefreshed(true);
+      setTimeout(() => setJustRefreshed(false), 1500);
     } finally {
       setLoading(false);
       if (!silent) setRefreshing(false);
@@ -551,7 +554,7 @@ export default function Dashboard() {
             <button
               onClick={() => fetchAll(false)}
               disabled={refreshing}
-              className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+              className={`p-2 rounded-lg transition-colors ${justRefreshed ? 'text-green-400 bg-green-400/10' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
               title="Refresh"
             >
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
