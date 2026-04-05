@@ -221,6 +221,55 @@ def update_trade_sl(trade_id: str, new_sl: float) -> None:
             """, (new_sl, trade_id))
 
 
+def get_recent_closed_trades(symbol: Optional[str] = None, limit: int = 20) -> list[dict]:
+    """Return recent closed trades joined with their Signal for indicators/reasoning."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            if symbol:
+                cur.execute("""
+                    SELECT t.id, t.symbol, t.direction, t."lotSize", t."entryPrice",
+                           t."exitPrice", t.pnl, t."closeTime", t.notes,
+                           s.confidence, s.timeframe, s.indicators
+                    FROM "Trade" t
+                    LEFT JOIN "Signal" s ON t."signalId" = s.id
+                    WHERE t.status = 'CLOSED' AND t.symbol = %s
+                    ORDER BY t."closeTime" DESC
+                    LIMIT %s
+                """, (symbol, limit))
+            else:
+                cur.execute("""
+                    SELECT t.id, t.symbol, t.direction, t."lotSize", t."entryPrice",
+                           t."exitPrice", t.pnl, t."closeTime", t.notes,
+                           s.confidence, s.timeframe, s.indicators
+                    FROM "Trade" t
+                    LEFT JOIN "Signal" s ON t."signalId" = s.id
+                    WHERE t.status = 'CLOSED'
+                    ORDER BY t."closeTime" DESC
+                    LIMIT %s
+                """, (limit,))
+            rows = cur.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if d.get("indicators") and isinstance(d["indicators"], str):
+                    try:
+                        import json
+                        d["indicators"] = json.loads(d["indicators"])
+                    except Exception:
+                        d["indicators"] = {}
+                result.append(d)
+            return result
+
+
+def update_trade_notes(trade_id: str, notes: str) -> None:
+    """Append or set notes on a trade record (used for post-trade analysis)."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "Trade" SET notes = %s WHERE id = %s
+            """, (notes, trade_id))
+
+
 def get_daily_pnl() -> float:
     """Sum of PnL for all trades closed in the last 24 hours."""
     with _conn() as conn:

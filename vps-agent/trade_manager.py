@@ -17,8 +17,9 @@ from config import (
     TRAILING_OFFSET_BY_SYMBOL,
     PIP_SIZE,
 )
-from database import get_open_trades, close_trade, create_audit_log, update_trade_sl
+from database import get_open_trades, close_trade, create_audit_log, update_trade_sl, update_trade_notes
 from mt5_client import modify_position_sl, fetch_quotes
+from reasoning import post_trade_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,20 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
                 "exit_price": exit_price,
                 "estimated_pnl": estimated_pnl,
             })
+
+            # Post-trade analysis — write a lesson into Trade.notes
+            try:
+                original_reasoning = trade.get("notes") or ""
+                lesson = await post_trade_analysis(
+                    symbol, direction, entry_price, exit_price,
+                    estimated_pnl, original_reasoning,
+                )
+                if lesson:
+                    update_trade_notes(trade_id, lesson)
+                    logger.info("Post-trade lesson saved for %s: %s", symbol, lesson[:80])
+            except Exception as e:
+                logger.warning("Post-trade analysis failed for %s: %s", symbol, e)
+
             continue
 
         pos = ticket_to_pos[matched_ticket]

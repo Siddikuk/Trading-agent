@@ -20,7 +20,7 @@ from config import (
 from database import (
     get_agent_state, update_agent_state,
     create_trade, create_signal, update_signal, create_audit_log,
-    get_open_trades,
+    get_open_trades, get_recent_closed_trades,
 )
 from mt5_client import (
     ping_bridge, fetch_account_and_positions,
@@ -184,10 +184,12 @@ async def run_cycle() -> dict:
                 current_price * 0.999,  # rough SL placeholder for max-lot calc
                 sym, mtf.lot_multiplier,
             )
+            recent_trades = get_recent_closed_trades(sym, limit=20)
             return await analyse_with_claude(
                 sym, current_price, mtf, candles_by_tf,
                 news_by_sym.get(sym, []),
                 balance, risk_pct, max_lots,
+                recent_trades=recent_trades,
             )
 
     decisions = await asyncio.gather(

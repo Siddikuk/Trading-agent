@@ -165,6 +165,66 @@ def _format_tf_block(tf: str, sig: TFSignal, candles: list) -> str:
 └{"─" * 52}┘"""
 
 
+def _build_trade_history_section(trades: list[dict]) -> str:
+    """Format recent closed trades as a prompt section for Claude."""
+    if not trades:
+        return ""
+
+    lines = ["## RECENT TRADE HISTORY (use to improve decisions)"]
+    for t in trades[:5]:
+        pnl = float(t.get("pnl") or 0)
+        outcome = "WIN" if pnl > 0 else "LOSS"
+        ind = t.get("indicators") or {}
+        rr = ind.get("risk_reward", "?")
+        raw_reasoning = ind.get("reasoning", t.get("notes") or "")
+        short_reasoning = (raw_reasoning[:150] + "…") if len(raw_reasoning) > 150 else raw_reasoning
+        lines.append(
+            f"  {t['symbol']} {t['direction']} | {outcome} P&L={pnl:+.2f} | "
+            f"R:R={rr} | {short_reasoning}"
+        )
+
+    wins   = sum(1 for t in trades if float(t.get("pnl") or 0) > 0)
+    total  = len(trades)
+    buy_w  = sum(1 for t in trades if t["direction"] == "BUY" and float(t.get("pnl") or 0) > 0)
+    buy_t  = sum(1 for t in trades if t["direction"] == "BUY")
+    sell_w = sum(1 for t in trades if t["direction"] == "SELL" and float(t.get("pnl") or 0) > 0)
+    sell_t = sum(1 for t in trades if t["direction"] == "SELL")
+
+    lines.append(
+        f"  Win rate: {wins}/{total} ({100*wins//total if total else 0}%) | "
+        f"BUY {buy_w}/{buy_t} | SELL {sell_w}/{sell_t}"
+    )
+    return "\n".join(lines)
+
+
+async def post_trade_analysis(
+    symbol: str,
+    direction: str,
+    entry_price: float,
+    exit_price: float,
+    pnl: float,
+    original_reasoning: str,
+) -> str:
+    """
+    Run a short Claude call after a trade closes to extract a 2-3 sentence lesson.
+    Returns the lesson text, or empty string on failure.
+    """
+    outcome = "profitable" if pnl > 0 else "a loss"
+    prompt = (
+        f"A {direction} trade on {symbol} just closed as {outcome}. "
+        f"Entry: {entry_price:.5f} | Exit: {exit_price:.5f} | P&L: {pnl:+.2f}\n\n"
+        f"Original reasoning at entry:\n{original_reasoning[:400]}\n\n"
+        f"Write exactly 2-3 sentences: what went right or wrong, and what to watch for "
+        f"next time trading {symbol}. Be specific about indicators or market conditions."
+    )
+    try:
+        raw = await _call_claude(prompt)
+        return raw.strip()
+    except Exception as e:
+        logger.warning("post_trade_analysis failed for %s: %s", symbol, e)
+        return ""
+
+
 def build_prompt(
     symbol: str,
     current_price: float,
@@ -174,6 +234,7 @@ def build_prompt(
     balance: float,
     risk_pct: float,
     max_lots: float,
+    recent_trades: list[dict] | None = None,
 ) -> str:
     entry_ind = mtf.tf_signals.get(ENTRY_TIMEFRAME)
     atr       = entry_ind.indicators["atr"] if entry_ind else current_price * 0.001
@@ -192,6 +253,9 @@ def build_prompt(
     suggested_tp_buy  = current_price + atr * 2.5
     suggested_tp_sell = current_price - atr * 2.5
 
+    history_section = _build_trade_history_section(recent_trades or [])
+    history_block   = f"\n{history_section}\n" if history_section else ""
+
     return f"""Symbol: {symbol} | Price: {current_price:.5f} | MTF Confluence: {confluence_str}
 Account: Balance ${balance:.2f} | Max Risk: {risk_pct:.1f}% | Max Lots: {max_lots:.2f}
 
@@ -199,7 +263,7 @@ Account: Balance ${balance:.2f} | Max Risk: {risk_pct:.1f}% | Max Lots: {max_lot
 
 NEWS & SENTIMENT ({len(news)} articles, last 24h):
 {news_str}
-
+{history_block}
 RISK GUIDANCE (based on {ENTRY_TIMEFRAME} ATR={atr:.5f}):
 BUY scenario  → SL: {suggested_sl_buy:.5f}  TP: {suggested_tp_buy:.5f}
 SELL scenario → SL: {suggested_sl_sell:.5f}  TP: {suggested_tp_sell:.5f}
@@ -358,6 +422,7 @@ async def analyse_with_claude(
     balance: float,
     risk_pct: float,
     max_lots: float,
+    recent_trades: list[dict] | None = None,
 ) -> AIDecision:
     """
     Build the multi-TF prompt, call Claude, parse the decision.
@@ -368,6 +433,7 @@ async def analyse_with_claude(
         symbol, current_price, mtf,
         candles_by_tf, news,
         balance, risk_pct, max_lots,
+        recent_trades=recent_trades,
     )
     logger.debug("Claude prompt length: %d chars", len(prompt))
 
