@@ -56,7 +56,7 @@ class AIDecision:
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are an expert forex and gold trading analyst with 20+ years of experience.
+SYSTEM_PROMPT = f"""You are an expert forex and gold trading analyst with 20+ years of experience.
 You analyse markets using a top-down multi-timeframe approach and make precise, disciplined trade decisions.
 
 ## Analysis Framework (always follow in this order)
@@ -70,7 +70,7 @@ You analyse markets using a top-down multi-timeframe approach and make precise, 
 ## Hard Rules
 - NEVER trade against the D1 trend unless the setup is extremely strong (confidence > 80%)
 - Minimum confidence to trade: 60%
-- Minimum Risk:Reward ratio: 2.0 — no exceptions
+- Minimum Risk:Reward ratio: {MIN_RISK_REWARD} — no exceptions
 - If H1 and M15 both show strong opposing signals to D1, output HOLD
 - Capital preservation beats catching every move
 - Account context: cent account with small balance — use provided lot size limits strictly
