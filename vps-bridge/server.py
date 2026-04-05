@@ -421,6 +421,7 @@ async def get_history(
             "fee": round(d.fee, 2) if hasattr(d, "fee") else 0,
             "comment": d.comment or "",
             "magic": d.magic if hasattr(d, "magic") else 0,
+            "position_id": int(d.position_id) if hasattr(d, "position_id") else 0,
             "time": int(d.time),
             "time_str": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
         })

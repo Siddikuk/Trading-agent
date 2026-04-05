@@ -18,7 +18,7 @@ from config import (
     PIP_SIZE,
 )
 from database import get_open_trades, close_trade, create_audit_log, update_trade_sl, update_trade_notes
-from mt5_client import modify_position_sl, fetch_quotes
+from mt5_client import modify_position_sl, fetch_quotes, fetch_deal_by_position
 from reasoning import post_trade_analysis
 
 logger = logging.getLogger(__name__)
@@ -87,34 +87,45 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
         current_tp  = float(trade.get("takeProfit") or 0)
 
         # ── 1. Sync closed trades ────────────────────────────────────────────
-        # Try to find this trade in MT5 by matching symbol + direction
-        # (We don't store MT5 ticket in DB — match by symbol+direction+open_proximity)
         matched_ticket = _find_mt5_ticket(trade, mt5_positions)
 
         if matched_ticket is None:
             # Trade not found in MT5 — closed externally (SL/TP hit, manual close, broker action)
             logger.info("Trade %s not found in MT5 — marking CLOSED", trade_id[:8])
 
-            # Fetch current quote to estimate exit price (best approximation without ticket)
             exit_price = entry_price  # fallback
             estimated_pnl = 0.0
-            try:
-                quotes = await fetch_quotes([symbol])
-                q = quotes.get(symbol, {})
-                if q:
-                    # Use mid-price as proxy for exit price
-                    bid = float(q.get("bid") or q.get("last") or entry_price)
-                    ask = float(q.get("ask") or bid)
-                    exit_price = (bid + ask) / 2.0
-                    pip = PIP_SIZE.get(symbol, 0.0001)
-                    lot_size = float(trade.get("lotSize") or 0.01)
-                    # Rough PnL: pips × pip_value × lots (pip_value ≈ $1 for 0.01 lots standard)
-                    pips = _pips_profit(direction, entry_price, exit_price, symbol)
-                    # 1 pip = pip_size price movement; for standard lot $10/pip, micro $0.10/pip
-                    pip_value = 10.0 * lot_size  # approximate; broker handles exact
-                    estimated_pnl = pips * pip_value
-            except Exception as e:
-                logger.warning("Could not fetch quote for closed trade %s: %s", trade_id[:8], e)
+
+            # Try to get actual close price + P&L from MT5 deal history
+            mt5_ticket = int(trade.get("mt5Ticket") or 0)
+            if mt5_ticket:
+                try:
+                    deal = await fetch_deal_by_position(mt5_ticket)
+                    if deal:
+                        exit_price = float(deal["price"])
+                        estimated_pnl = float(deal.get("profit", 0)) + \
+                                        float(deal.get("swap", 0)) + \
+                                        float(deal.get("commission", 0))
+                        logger.info("Got actual close from MT5 history: price=%.5f pnl=%.2f",
+                                    exit_price, estimated_pnl)
+                except Exception as e:
+                    logger.warning("MT5 history lookup failed for ticket %s: %s", mt5_ticket, e)
+
+            # Fallback: estimate from current quote if history lookup failed
+            if exit_price == entry_price:
+                try:
+                    quotes = await fetch_quotes([symbol])
+                    q = quotes.get(symbol, {})
+                    if q:
+                        bid = float(q.get("bid") or q.get("last") or entry_price)
+                        ask = float(q.get("ask") or bid)
+                        exit_price = (bid + ask) / 2.0
+                        lot_size = float(trade.get("lotSize") or 0.01)
+                        pips = _pips_profit(direction, entry_price, exit_price, symbol)
+                        pip_value = 10.0 * lot_size
+                        estimated_pnl = pips * pip_value
+                except Exception as e:
+                    logger.warning("Quote fallback failed for %s: %s", trade_id[:8], e)
 
             close_trade(trade_id, exit_price=exit_price, pnl=estimated_pnl)
             create_audit_log("TRADE_SYNCED_CLOSED", symbol, {

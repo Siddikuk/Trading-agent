@@ -299,8 +299,8 @@ async def run_cycle() -> dict:
                 strategy="AI-MTF",
                 signal_id=sig_id,
                 notes=(f"Confluence {mtf.confluence_count}/{mtf.total_tfs} | "
-                       f"Conf={decision.confidence:.0f}% | R:R={rr:.2f} | "
-                       f"MT5 ticket={ticket}"),
+                       f"Conf={decision.confidence:.0f}% | R:R={rr:.2f}"),
+                mt5_ticket=int(ticket) if ticket else 0,
             )
 
             # Mark existing signal as executed (avoid duplicate DB row)

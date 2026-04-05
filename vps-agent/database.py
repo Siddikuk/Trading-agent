@@ -100,12 +100,17 @@ CREATE INDEX IF NOT EXISTS "AuditLog_symbol_idx" ON "AuditLog" (symbol);
 CREATE INDEX IF NOT EXISTS "AuditLog_created_at_idx" ON "AuditLog" (created_at DESC);
 """
 
+TRADE_TICKET_DDL = """
+ALTER TABLE "Trade" ADD COLUMN IF NOT EXISTS "mt5Ticket" BIGINT;
+"""
+
 
 def run_migrations() -> None:
-    """Ensure AuditLog table exists. Safe to call on every startup."""
+    """Ensure AuditLog table and Trade.mt5Ticket column exist."""
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(AUDIT_LOG_DDL)
+            cur.execute(TRADE_TICKET_DDL)
     logger.info("DB migrations applied")
 
 
@@ -176,6 +181,7 @@ def create_trade(
     strategy: str = "AI-MTF",
     signal_id: Optional[str] = None,
     notes: str = "",
+    mt5_ticket: int = 0,
 ) -> str:
     trade_id = str(uuid.uuid4())
     with _conn() as conn:
@@ -184,11 +190,12 @@ def create_trade(
                 INSERT INTO "Trade"
                     (id, symbol, direction, "lotSize", "entryPrice",
                      "stopLoss", "takeProfit", status, strategy,
-                     "signalId", notes, "openTime")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'OPEN', %s, %s, %s, NOW())
+                     "signalId", notes, "mt5Ticket", "openTime")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, NOW())
             """, (
                 trade_id, symbol, direction, lot_size, entry_price,
                 stop_loss, take_profit, strategy, signal_id, notes,
+                mt5_ticket or None,
             ))
     logger.info("Trade created: %s %s %s @ %s", trade_id[:8], direction, symbol, entry_price)
     return trade_id

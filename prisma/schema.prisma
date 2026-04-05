@@ -20,6 +20,7 @@ model Trade {
   status      String   @default("OPEN")
   signalId    String?
   strategy    String?
+  mt5Ticket   BigInt?
   openTime    DateTime @default(now())
   closeTime   DateTime?
   notes       String?
