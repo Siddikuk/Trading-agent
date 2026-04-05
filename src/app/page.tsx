@@ -554,7 +554,8 @@ export default function Dashboard() {
             <button
               onClick={() => fetchAll(false)}
               disabled={refreshing}
-              className={`p-2 rounded-lg transition-colors ${justRefreshed ? 'text-green-400 bg-green-400/10' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
+              className="p-2 rounded-lg transition-colors text-slate-500 hover:text-white hover:bg-slate-800"
+              style={justRefreshed ? { color: '#4ade80', backgroundColor: 'rgba(74,222,128,0.1)' } : undefined}
               title="Refresh"
             >
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
