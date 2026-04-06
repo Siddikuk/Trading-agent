@@ -341,6 +341,12 @@ async def _call_claude(prompt: str) -> str:
                     wait = CLAUDE_RETRY_BACKOFF[min(attempt, len(CLAUDE_RETRY_BACKOFF) - 1)]
                     logger.warning("Claude overloaded (%d), waiting %ds", e.status_code, wait)
                     time.sleep(wait)
+                elif e.status_code == 402:
+                    logger.error(
+                        "CREDITS EXHAUSTED — Claude API returned 402. "
+                        "Top up at console.anthropic.com or raise your spending limit on the API key."
+                    )
+                    raise  # don't retry — credits won't come back on retry
                 else:
                     raise
         raise RuntimeError(f"Claude API failed after {CLAUDE_RETRY_ATTEMPTS} attempts")
@@ -351,7 +357,7 @@ async def _call_claude(prompt: str) -> str:
             timeout=150,  # 2.5 min hard ceiling — SDK timeout is 2 min
         )
     except asyncio.TimeoutError:
-        logger.error("Claude API call timed out after 150s for %s — skipping", symbol)
+        logger.error("Claude API call timed out after 150s — skipping this symbol")
         raise RuntimeError("Claude API timeout")
 
 
