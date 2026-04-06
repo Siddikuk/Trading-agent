@@ -250,8 +250,8 @@ def build_prompt(
 
     suggested_sl_buy  = current_price - atr * 1.5
     suggested_sl_sell = current_price + atr * 1.5
-    suggested_tp_buy  = current_price + atr * 2.5
-    suggested_tp_sell = current_price - atr * 2.5
+    suggested_tp_buy  = current_price + atr * 3.0   # 3.0 × ATR → 2.0 R:R minimum
+    suggested_tp_sell = current_price - atr * 3.0
 
     history_section = _build_trade_history_section(recent_trades or [])
     history_block   = f"\n{history_section}\n" if history_section else ""
