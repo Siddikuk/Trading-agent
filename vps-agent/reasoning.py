@@ -341,10 +341,13 @@ async def _call_claude(prompt: str) -> str:
                     wait = CLAUDE_RETRY_BACKOFF[min(attempt, len(CLAUDE_RETRY_BACKOFF) - 1)]
                     logger.warning("Claude overloaded (%d), waiting %ds", e.status_code, wait)
                     time.sleep(wait)
-                elif e.status_code == 402:
+                elif e.status_code == 402 or (
+                    e.status_code == 400 and "credit balance is too low" in str(e)
+                ):
                     logger.error(
-                        "CREDITS EXHAUSTED — Claude API returned 402. "
-                        "Top up at console.anthropic.com or raise your spending limit on the API key."
+                        "CREDITS EXHAUSTED — Claude API returned %d. "
+                        "Top up at console.anthropic.com → Plans & Billing.",
+                        e.status_code,
                     )
                     raise  # don't retry — credits won't come back on retry
                 else:
