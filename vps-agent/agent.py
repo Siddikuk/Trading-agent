@@ -132,6 +132,17 @@ async def run_cycle() -> dict:
     # Fetch economic calendar (cached, 1 h TTL — never blocks on failure)
     loop = asyncio.get_event_loop()
     calendar_events = await loop.run_in_executor(None, fetch_calendar)
+    # Write snapshot to DB so the dashboard (Vercel) can read it without calling ForexFactory
+    if calendar_events:
+        create_audit_log("CALENDAR_SNAPSHOT", None, {
+            "events": [
+                {
+                    "title": e.title, "country": e.country, "impact": e.impact,
+                    "event_utc": e.event_utc, "forecast": e.forecast, "previous": e.previous,
+                }
+                for e in calendar_events
+            ]
+        })
 
     # ── 8. Pre-filter: run mechanical analysis, discard low-confluence ─────────
     candidates: list[tuple[str, object]] = []   # (symbol, MTFAnalysis)

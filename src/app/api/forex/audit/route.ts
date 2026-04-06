@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 export async function GET() {
   try {
     const logs = await db.auditLog.findMany({
+      where: { action: { not: 'CALENDAR_SNAPSHOT' } },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });

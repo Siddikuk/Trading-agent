@@ -53,6 +53,7 @@ class EconomicEvent:
     minutes_away: int  # >0 = future, <0 = just passed
     forecast: str
     previous: str
+    event_utc: str = ""  # ISO 8601 UTC timestamp — used by dashboard DB cache
 
 
 def _parse_event_time(date_str: str, time_str: str) -> Optional[datetime]:
@@ -150,6 +151,7 @@ def fetch_calendar() -> list[EconomicEvent]:
             minutes_away=minutes_away,
             forecast=item.get("forecast") or "",
             previous=item.get("previous") or "",
+            event_utc=event_dt.isoformat(),
         ))
 
     # Deduplicate (same title + country + time can appear in both week JSONs)
