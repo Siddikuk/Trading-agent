@@ -114,12 +114,21 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
                         estimated_pnl = float(deal.get("profit", 0)) + \
                                         float(deal.get("swap", 0)) + \
                                         float(deal.get("commission", 0))
+                        # Some brokers (e.g. RoboForex) report profit=0 in the closing deal
+                        # even when the exit price is correct — calculate from price move
+                        if estimated_pnl == 0 and exit_price != entry_price:
+                            lot_size = float(trade.get("lotSize") or 0.01)
+                            pips = _pips_profit(direction, entry_price, exit_price, symbol)
+                            pip_value = 10.0 * lot_size
+                            estimated_pnl = pips * pip_value
+                            logger.info("P&L from price move (broker reported 0): entry=%.5f exit=%.5f pnl=%.2f",
+                                        entry_price, exit_price, estimated_pnl)
                         logger.info("Got actual close from MT5 history: price=%.5f pnl=%.2f",
                                     exit_price, estimated_pnl)
                 except Exception as e:
                     logger.warning("MT5 history lookup failed for ticket %s: %s", mt5_ticket, e)
 
-            # Fallback: estimate from current quote if history lookup failed
+            # Fallback: estimate from current quote if history lookup still failed
             if exit_price == entry_price:
                 try:
                     quotes = await fetch_quotes([symbol])

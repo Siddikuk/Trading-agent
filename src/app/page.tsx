@@ -227,7 +227,7 @@ function SignalCard({ signal, active }: { signal: Signal; active: boolean }) {
           />
         </div>
         <span className="text-xs font-semibold text-slate-300 w-8 text-right">{Math.round(signal.confidence)}%</span>
-        {rr !== null && (
+        {rr !== null && Number(rr) > 0 && (
           <span className="text-xs text-slate-500 w-16 text-right font-mono">R:R {Number(rr).toFixed(2)}</span>
         )}
       </div>
