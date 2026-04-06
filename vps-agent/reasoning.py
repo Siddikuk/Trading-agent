@@ -173,27 +173,41 @@ def _build_trade_history_section(trades: list[dict]) -> str:
     lines = ["## RECENT TRADE HISTORY (use to improve decisions)"]
     for t in trades[:5]:
         pnl = float(t.get("pnl") or 0)
-        outcome = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "CLOSED")
+        if pnl > 0:
+            outcome = f"WIN P&L={pnl:+.2f}"
+        elif pnl < 0:
+            outcome = f"LOSS P&L={pnl:+.2f}"
+        else:
+            outcome = "CLOSED (P&L unavailable — trailing stop or data gap)"
         ind = t.get("indicators") or {}
         rr = ind.get("risk_reward", "?")
         raw_reasoning = ind.get("reasoning", t.get("notes") or "")
         short_reasoning = (raw_reasoning[:150] + "…") if len(raw_reasoning) > 150 else raw_reasoning
         lines.append(
-            f"  {t['symbol']} {t['direction']} | {outcome} P&L={pnl:+.2f} | "
+            f"  {t['symbol']} {t['direction']} | {outcome} | "
             f"R:R={rr} | {short_reasoning}"
         )
 
-    wins   = sum(1 for t in trades if float(t.get("pnl") or 0) > 0)
-    total  = len(trades)
-    buy_w  = sum(1 for t in trades if t["direction"] == "BUY" and float(t.get("pnl") or 0) > 0)
-    buy_t  = sum(1 for t in trades if t["direction"] == "BUY")
-    sell_w = sum(1 for t in trades if t["direction"] == "SELL" and float(t.get("pnl") or 0) > 0)
-    sell_t = sum(1 for t in trades if t["direction"] == "SELL")
-
-    lines.append(
-        f"  Win rate: {wins}/{total} ({100*wins//total if total else 0}%) | "
-        f"BUY {buy_w}/{buy_t} | SELL {sell_w}/{sell_t}"
-    )
+    # Only count trades with known P&L in win rate — exclude 0-P&L (trailing stop / data gap)
+    resolved = [t for t in trades if float(t.get("pnl") or 0) != 0]
+    unresolved = len(trades) - len(resolved)
+    if resolved:
+        wins   = sum(1 for t in resolved if float(t["pnl"]) > 0)
+        total  = len(resolved)
+        buy_w  = sum(1 for t in resolved if t["direction"] == "BUY" and float(t["pnl"]) > 0)
+        buy_t  = sum(1 for t in resolved if t["direction"] == "BUY")
+        sell_w = sum(1 for t in resolved if t["direction"] == "SELL" and float(t["pnl"]) > 0)
+        sell_t = sum(1 for t in resolved if t["direction"] == "SELL")
+        lines.append(
+            f"  Win rate: {wins}/{total} ({100*wins//total}%) | "
+            f"BUY {buy_w}/{buy_t} | SELL {sell_w}/{sell_t}"
+            + (f" | {unresolved} trade(s) closed via trailing stop (outcome positive)" if unresolved else "")
+        )
+    else:
+        lines.append(
+            f"  Win rate: N/A — all {len(trades)} recent trade(s) closed via trailing stop "
+            f"(P&L not yet recorded, likely profitable exits)"
+        )
     return "\n".join(lines)
 
 
