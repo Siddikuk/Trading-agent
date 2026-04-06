@@ -14,7 +14,6 @@ from config import (
     WATCH_SYMBOLS,
     TIMEFRAMES,
     MAX_CONCURRENT_CLAUDE,
-    MIN_CONFIDENCE_TO_SIGNAL,
     MIN_TF_CONFLUENCE,
     ENTRY_TIMEFRAME,
 )
@@ -257,23 +256,20 @@ async def run_cycle() -> dict:
         indicators_snapshot["skip_reason"] = decision.skip_reason
         indicators_snapshot["risk_reward"] = decision.risk_reward
 
-        # Write signal regardless of trade decision (for dashboard visibility)
-        if decision.confidence >= MIN_CONFIDENCE_TO_SIGNAL:
-            sig_id = create_signal(
-                symbol=sym,
-                direction=decision.direction,
-                confidence=decision.confidence,
-                entry_price=decision.entry_price,
-                stop_loss=decision.stop_loss,
-                take_profit=decision.take_profit,
-                strategy="AI-MTF",
-                timeframe=timeframe,
-                indicators=indicators_snapshot,
-                executed=False,
-            )
-            summary["new_signals"] += 1
-        else:
-            sig_id = None
+        # Always write signal when Claude ran — even low-confidence HOLDs update the dashboard
+        sig_id = create_signal(
+            symbol=sym,
+            direction=decision.direction,
+            confidence=decision.confidence,
+            entry_price=decision.entry_price,
+            stop_loss=decision.stop_loss,
+            take_profit=decision.take_profit,
+            strategy="AI-MTF",
+            timeframe=timeframe,
+            indicators=indicators_snapshot,
+            executed=False,
+        )
+        summary["new_signals"] += 1
 
         # Audit every Claude decision
         create_audit_log("CLAUDE_DECISION", sym, {

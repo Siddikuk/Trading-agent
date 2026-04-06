@@ -67,6 +67,16 @@ interface NewsItem {
   reliability: string;
 }
 
+interface CalendarEvent {
+  title: string;
+  country: string;
+  impact: string;      // "High" | "Medium"
+  minutesAway: number;
+  forecast: string;
+  previous: string;
+  eventTime: string;
+}
+
 interface ParsedIndicators {
   reasoning?: string;
   skip_reason?: string;
@@ -387,6 +397,7 @@ export default function Dashboard() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
@@ -418,13 +429,16 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Fetch news separately (slower, every 5 min)
+  // Fetch news + calendar separately (slower, every 5 min)
   const fetchNews = useCallback(async () => {
     setNewsLoading(true);
     try {
-      const res = await fetch('/api/forex/news');
-      const data = await res.json();
-      if (data.results) setNews(data.results);
+      const [newsRes, calRes] = await Promise.allSettled([
+        fetch('/api/forex/news').then(r => r.json()),
+        fetch('/api/forex/calendar').then(r => r.json()),
+      ]);
+      if (newsRes.status === 'fulfilled' && newsRes.value?.results) setNews(newsRes.value.results);
+      if (calRes.status === 'fulfilled' && calRes.value?.events) setCalendarEvents(calRes.value.events);
     } catch { /* silently fail */ }
     finally { setNewsLoading(false); }
   }, []);
@@ -802,6 +816,41 @@ export default function Dashboard() {
                   Refresh
                 </button>
               </div>
+
+              {/* Economic calendar */}
+              {calendarEvents.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider mb-2">
+                    Upcoming Economic Events
+                  </p>
+                  <div className="space-y-1">
+                    {calendarEvents.slice(0, 6).map((ev, i) => {
+                      const isHigh = ev.impact === 'High';
+                      const when = ev.minutesAway < 0
+                        ? `${Math.abs(ev.minutesAway)}m ago`
+                        : ev.minutesAway < 60
+                        ? `in ${ev.minutesAway}m ⚠`
+                        : ev.minutesAway < 120
+                        ? `in ${Math.floor(ev.minutesAway / 60)}h ${ev.minutesAway % 60}m`
+                        : `in ~${Math.floor(ev.minutesAway / 60)}h`;
+                      return (
+                        <div
+                          key={i}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-[11px] ${
+                            isHigh ? 'bg-red-500/10 border border-red-500/20' : 'bg-amber-500/8 border border-amber-500/15'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isHigh ? 'bg-red-400' : 'bg-amber-400'}`} />
+                          <span className={`font-bold flex-shrink-0 ${isHigh ? 'text-red-300' : 'text-amber-300'}`}>{ev.country}</span>
+                          <span className="text-slate-300 flex-1 truncate">{ev.title}</span>
+                          {ev.forecast && <span className="text-slate-500 flex-shrink-0">F:{ev.forecast}</span>}
+                          <span className={`flex-shrink-0 font-medium ${isHigh ? 'text-red-300' : 'text-amber-300'}`}>{when}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {news.length === 0 ? (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">

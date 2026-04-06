@@ -173,7 +173,7 @@ def _build_trade_history_section(trades: list[dict]) -> str:
     lines = ["## RECENT TRADE HISTORY (use to improve decisions)"]
     for t in trades[:5]:
         pnl = float(t.get("pnl") or 0)
-        outcome = "WIN" if pnl > 0 else "LOSS"
+        outcome = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "CLOSED")
         ind = t.get("indicators") or {}
         rr = ind.get("risk_reward", "?")
         raw_reasoning = ind.get("reasoning", t.get("notes") or "")
