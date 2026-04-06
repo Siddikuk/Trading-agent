@@ -17,7 +17,10 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+_CALENDAR_URLS = [
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
+]
 _CACHE_TTL = 3600  # re-fetch at most once per hour
 _cache: Optional[tuple[float, list]] = None  # (fetched_at, events)
 
@@ -82,7 +85,8 @@ def _parse_event_time(date_str: str, time_str: str) -> Optional[datetime]:
 
 def fetch_calendar() -> list[EconomicEvent]:
     """
-    Return upcoming high/medium impact events for this week.
+    Return upcoming high/medium impact events for this week + next week.
+    Fetches both URLs so weekend scans still see Monday's events.
     Results cached for 1 hour. Returns [] on any network/parse error.
     """
     global _cache
@@ -91,53 +95,64 @@ def fetch_calendar() -> list[EconomicEvent]:
     if _cache and (now - _cache[0]) < _CACHE_TTL:
         return _cache[1]
 
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(
-            _CALENDAR_URL,
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
-            raw = json.loads(resp.read().decode())
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
 
-        now_dt = datetime.now(timezone.utc)
-        events: list[EconomicEvent] = []
+    raw_items: list[dict] = []
+    for url in _CALENDAR_URLS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
+                raw_items.extend(json.loads(resp.read().decode()))
+        except Exception as exc:
+            logger.debug("Calendar URL %s failed: %s", url, exc)
 
-        for item in raw:
-            impact = (item.get("impact") or "").strip()
-            if impact not in ("High", "Medium"):
-                continue
-
-            event_dt = _parse_event_time(
-                item.get("date", ""), item.get("time", "")
-            )
-            if event_dt is None:
-                continue
-
-            minutes_away = int((event_dt - now_dt).total_seconds() / 60)
-            # Keep: within next 24 h, or passed within last 1 h
-            if minutes_away < -60 or minutes_away > 1440:
-                continue
-
-            events.append(EconomicEvent(
-                title=item.get("title", ""),
-                country=(item.get("country") or "").upper(),
-                impact=impact,
-                minutes_away=minutes_away,
-                forecast=item.get("forecast") or "",
-                previous=item.get("previous") or "",
-            ))
-
-        events.sort(key=lambda e: e.minutes_away)
-        _cache = (now, events)
-        logger.info("Economic calendar: %d upcoming high/medium events loaded", len(events))
-        return events
-
-    except Exception as exc:
-        logger.warning("Economic calendar fetch failed (trading continues): %s", exc)
+    if not raw_items:
+        logger.warning("Economic calendar fetch failed (trading continues)")
         return _cache[1] if _cache else []
+
+    now_dt = datetime.now(timezone.utc)
+    events: list[EconomicEvent] = []
+
+    for item in raw_items:
+        impact = (item.get("impact") or "").strip()
+        if impact not in ("High", "Medium"):
+            continue
+
+        event_dt = _parse_event_time(
+            item.get("date", ""), item.get("time", "")
+        )
+        if event_dt is None:
+            continue
+
+        minutes_away = int((event_dt - now_dt).total_seconds() / 60)
+        # Keep: within next 48 h (covers weekend → Monday), or passed within last 1 h
+        if minutes_away < -60 or minutes_away > 2880:
+            continue
+
+        events.append(EconomicEvent(
+            title=item.get("title", ""),
+            country=(item.get("country") or "").upper(),
+            impact=impact,
+            minutes_away=minutes_away,
+            forecast=item.get("forecast") or "",
+            previous=item.get("previous") or "",
+        ))
+
+    # Deduplicate (same title + country + time can appear in both week JSONs)
+    seen: set[tuple] = set()
+    unique: list[EconomicEvent] = []
+    for e in events:
+        key = (e.title, e.country, e.minutes_away // 5)  # bucket by 5-min window
+        if key not in seen:
+            seen.add(key)
+            unique.append(e)
+
+    unique.sort(key=lambda e: e.minutes_away)
+    _cache = (now, unique)
+    logger.info("Economic calendar: %d upcoming high/medium events loaded (next 48h)", len(unique))
+    return unique
 
 
 def filter_for_symbol(
