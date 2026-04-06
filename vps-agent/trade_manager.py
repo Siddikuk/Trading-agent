@@ -16,6 +16,7 @@ from config import (
     TRAILING_OFFSET_PIPS,
     TRAILING_OFFSET_BY_SYMBOL,
     PIP_SIZE,
+    from_mt5_symbol,
 )
 from database import get_open_trades, close_trade, create_audit_log, update_trade_sl, update_trade_notes
 from mt5_client import modify_position_sl, fetch_quotes, fetch_deal_by_position
@@ -221,10 +222,21 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
 
 def _find_mt5_ticket(trade: dict, mt5_positions: list[dict]) -> Optional[int]:
     """
-    Match a DB trade to an MT5 position by symbol + direction + entry price proximity.
+    Match a DB trade to an MT5 position.
+    1. Primary: direct match by stored mt5Ticket (position ticket).
+    2. Fallback: fuzzy match by normalized symbol + direction + entry price proximity.
+       Uses from_mt5_symbol() to handle broker suffixes (e.g. XAUUSD+ → XAU/USD).
     Returns ticket number or None if not found.
     """
-    symbol    = trade["symbol"].replace("/", "")   # MT5 format
+    # Primary: direct ticket match (reliable after position_ticket fix)
+    stored_ticket = int(trade.get("mt5Ticket") or 0)
+    if stored_ticket:
+        for pos in mt5_positions:
+            if int(pos.get("ticket", 0)) == stored_ticket:
+                return stored_ticket
+
+    # Fallback: fuzzy match (handles pre-fix trades or netting accounts)
+    symbol    = trade["symbol"]   # canonical e.g. "XAU/USD"
     direction = trade["direction"]
     entry     = float(trade["entryPrice"])
     mt5_type  = 0 if direction == "BUY" else 1
@@ -233,7 +245,8 @@ def _find_mt5_ticket(trade: dict, mt5_positions: list[dict]) -> Optional[int]:
     best_diff   = float("inf")
 
     for pos in mt5_positions:
-        if pos.get("symbol") != symbol:
+        pos_symbol = from_mt5_symbol(pos.get("symbol", ""))  # normalise broker suffix
+        if pos_symbol != symbol:
             continue
         if int(pos.get("type", -1)) != mt5_type:
             continue
@@ -243,7 +256,7 @@ def _find_mt5_ticket(trade: dict, mt5_positions: list[dict]) -> Optional[int]:
             best_ticket = int(pos["ticket"])
 
     # Accept match only if entry prices are very close (within 20 pips)
-    pip = PIP_SIZE.get(trade["symbol"], 0.0001)
+    pip = PIP_SIZE.get(symbol, 0.0001)
     if best_ticket is not None and best_diff <= pip * 20:
         return best_ticket
     return None

@@ -198,9 +198,14 @@ async def run_cycle() -> dict:
         async with semaphore:
             candles_by_tf = candles_all.get(sym, {})
             current_price = _get_current_price(candles_by_tf)
+            entry_ind_hint = mtf.tf_signals.get(ENTRY_TIMEFRAME)
+            atr_hint = (entry_ind_hint.indicators.get("atr", current_price * 0.001)
+                        if entry_ind_hint else current_price * 0.001)
+            sl_hint = (mtf.stop_loss if (mtf.stop_loss and mtf.stop_loss > 0)
+                       else current_price - atr_hint * 1.5)
             max_lots = calc_position_size(
                 balance, risk_pct, current_price,
-                current_price * 0.999,  # rough SL placeholder for max-lot calc
+                sl_hint,
                 sym, mtf.lot_multiplier,
             )
             recent_trades = get_recent_closed_trades(sym, limit=20)
@@ -305,7 +310,7 @@ async def run_cycle() -> dict:
         )
 
         if order_result.get("success"):
-            ticket = order_result.get("ticket")
+            ticket = order_result.get("position_ticket") or order_result.get("ticket")
             fill_price = float(order_result.get("price", decision.entry_price))
 
             trade_id = create_trade(
