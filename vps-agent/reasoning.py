@@ -170,8 +170,6 @@ def _build_trade_history_section(trades: list[dict]) -> str:
     if not trades:
         return ""
 
-    lines = ["## RECENT TRADE HISTORY (use to improve decisions)"]
-
     def _resolve_pnl(t: dict) -> float:
         """Return stored pnl if non-zero; otherwise infer sign from entry/exit prices."""
         pnl = float(t.get("pnl") or 0)
@@ -183,6 +181,12 @@ def _build_trade_history_section(trades: list[dict]) -> str:
         if entry and exit_ and entry != exit_:
             return entry - exit_ if direction == "SELL" else exit_ - entry
         return 0.0
+
+    resolved_pnls = [_resolve_pnl(t) for t in trades]
+    if not any(p != 0 for p in resolved_pnls):
+        return ""   # no useful history — skip section entirely
+
+    lines = ["## RECENT TRADE HISTORY (use to improve decisions)"]
 
     for t in trades[:5]:
         pnl = _resolve_pnl(t)
@@ -205,7 +209,6 @@ def _build_trade_history_section(trades: list[dict]) -> str:
         )
 
     # Win rate from resolved P&L (stored or inferred from price move)
-    resolved_pnls = [_resolve_pnl(t) for t in trades]
     wins   = sum(1 for p in resolved_pnls if p > 0)
     losses = sum(1 for p in resolved_pnls if p < 0)
     total  = wins + losses
