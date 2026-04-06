@@ -319,8 +319,7 @@ async def _call_claude(prompt: str) -> str:
             try:
                 msg = _client.messages.create(
                     model=CLAUDE_MODEL,
-                    max_tokens=5000,
-                    thinking={"type": "enabled", "budget_tokens": 1024},
+                    max_tokens=4000,
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": prompt}],
                 )
