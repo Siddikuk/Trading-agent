@@ -45,17 +45,31 @@ WATCH_SYMBOLS: list[str] = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "XAU/USD"
 ]
 
-# Broker suffixes stripped when converting MT5 symbol → canonical (incoming only)
-_MT5_SUFFIXES = ('+', '.std', '.raw', '.r', '.m', '.i', '.pro', '.ecn', '-e', '.stp', '.t', '.n', '.c', '.sp')
+# Known base pair codes — used to validate suffix stripping
+_KNOWN_MT5_BASES: frozenset[str] = frozenset({
+    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "XAUUSD", "BTCUSD",
+    "AUDUSD", "NZDUSD", "USDCAD", "GBPJPY", "EURJPY", "EURGBP",
+})
+
+# Broker suffixes stripped when converting MT5 symbol → canonical (incoming only).
+# Dot-prefixed ones (.m) are checked first (more specific).
+# Bare suffixes (m) are checked next to handle brokers like RoboForex (XAUUSDm).
+_MT5_SUFFIXES = (
+    '+', '.std', '.raw', '.r', '.m', '.i', '.pro', '.ecn', '-e', '.stp',
+    '.t', '.n', '.c', '.sp', '.z', '.h',
+    'std', 'raw', 'pro', 'ecn', 'stp', 'm', 'i', 'c', 'n', 'r',
+)
 
 def from_mt5_symbol(mt5_sym: str) -> str:
     """Convert any broker MT5 symbol to canonical display form (e.g. EUR/USD)."""
     upper = mt5_sym.upper()
-    # Strip broker suffix first
+    # Strip broker suffix — only if the remainder is a recognised base pair
     for sfx in _MT5_SUFFIXES:
-        if upper.endswith(sfx.upper()):
-            upper = upper[:-len(sfx)]
-            break
+        if upper.endswith(sfx.upper()) and len(upper) > len(sfx):
+            candidate = upper[:-len(sfx)]
+            if candidate in _KNOWN_MT5_BASES:
+                upper = candidate
+                break
     pairs = {
         "EURUSD": "EUR/USD", "GBPUSD": "GBP/USD",
         "USDJPY": "USD/JPY", "USDCHF": "USD/CHF",

@@ -240,6 +240,7 @@ async def run_cycle() -> dict:
                 balance, risk_pct, max_lots,
                 recent_trades=recent_trades,
                 calendar_events=calendar_events,
+                open_positions=mt5_positions,
             )
 
     decisions = await asyncio.gather(

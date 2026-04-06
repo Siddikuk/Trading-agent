@@ -263,6 +263,7 @@ def build_prompt(
     max_lots: float,
     recent_trades: list[dict] | None = None,
     calendar_events: list | None = None,
+    open_positions: list[dict] | None = None,
 ) -> str:
     entry_ind = mtf.tf_signals.get(ENTRY_TIMEFRAME)
     atr       = entry_ind.indicators["atr"] if entry_ind else current_price * 0.001
@@ -284,6 +285,24 @@ def build_prompt(
     history_section = _build_trade_history_section(recent_trades or [])
     history_block   = f"\n{history_section}\n" if history_section else ""
 
+    # Open positions block — always show so Claude knows the current exposure
+    open_block = ""
+    if open_positions:
+        lines = ["## OPEN POSITIONS (live broker state)"]
+        for p in open_positions:
+            from config import from_mt5_symbol
+            pos_sym   = from_mt5_symbol(p.get("symbol", ""))
+            direction = "BUY" if int(p.get("type", 0)) == 0 else "SELL"
+            entry     = float(p.get("price_open", 0))
+            cur       = float(p.get("price_current", entry))
+            profit    = float(p.get("profit", 0))
+            ticket    = p.get("ticket", "?")
+            lines.append(
+                f"  {pos_sym} {direction} | entry={entry:.5f} current={cur:.5f} "
+                f"| P&L={profit:+.2f} | ticket={ticket}"
+            )
+        open_block = "\n" + "\n".join(lines) + "\n"
+
     # Economic calendar block
     cal_block = ""
     if calendar_events is not None:
@@ -299,7 +318,7 @@ Account: Balance ${balance:.2f} | Max Risk: {risk_pct:.1f}% | Max Lots: {max_lot
 
 NEWS & SENTIMENT ({len(news)} articles, last 24h):
 {news_str}
-{cal_block}{history_block}
+{cal_block}{open_block}{history_block}
 RISK GUIDANCE (based on {ENTRY_TIMEFRAME} ATR={atr:.5f}):
 BUY scenario  → SL: {suggested_sl_buy:.5f}  TP: {suggested_tp_buy:.5f}
 SELL scenario → SL: {suggested_sl_sell:.5f}  TP: {suggested_tp_sell:.5f}
@@ -475,6 +494,7 @@ async def analyse_with_claude(
     max_lots: float,
     recent_trades: list[dict] | None = None,
     calendar_events: list | None = None,
+    open_positions: list[dict] | None = None,
 ) -> AIDecision:
     """
     Build the multi-TF prompt, call Claude, parse the decision.
@@ -487,6 +507,7 @@ async def analyse_with_claude(
         balance, risk_pct, max_lots,
         recent_trades=recent_trades,
         calendar_events=calendar_events,
+        open_positions=open_positions,
     )
     logger.debug("Claude prompt length: %d chars", len(prompt))
 

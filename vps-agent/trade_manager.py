@@ -91,6 +91,28 @@ async def manage_open_trades(mt5_positions: list[dict]) -> None:
         matched_ticket = _find_mt5_ticket(trade, mt5_positions)
 
         if matched_ticket is None:
+            # Grace period: trades opened in the last 3 minutes may not yet appear
+            # in MT5 positions (broker propagation lag). Skip one cycle before closing.
+            import datetime as _dt
+            open_time = trade.get("openTime")
+            if open_time:
+                try:
+                    now_utc = _dt.datetime.now(_dt.timezone.utc)
+                    if isinstance(open_time, str):
+                        # Postgres returns ISO strings with timezone offset
+                        open_time = _dt.datetime.fromisoformat(open_time.replace("Z", "+00:00"))
+                    if not open_time.tzinfo:
+                        open_time = open_time.replace(tzinfo=_dt.timezone.utc)
+                    age_seconds = (now_utc - open_time).total_seconds()
+                    if age_seconds < 180:
+                        logger.info(
+                            "Trade %s not found in MT5 but only %.0fs old — "
+                            "skipping close (broker propagation lag)", trade_id[:8], age_seconds,
+                        )
+                        continue
+                except Exception:
+                    pass
+
             # Trade not found in MT5 — closed externally (SL/TP hit, manual close, broker action)
             logger.info("Trade %s not found in MT5 — marking CLOSED", trade_id[:8])
 
@@ -264,8 +286,11 @@ def _find_mt5_ticket(trade: dict, mt5_positions: list[dict]) -> Optional[int]:
             best_diff   = diff
             best_ticket = int(pos["ticket"])
 
-    # Accept match only if entry prices are very close (within 20 pips)
+    # Accept match if entry prices are close.
+    # Gold/BTC have large spreads and slippage, so allow up to 200 pips.
+    # Forex pairs use a tighter 30-pip window.
     pip = PIP_SIZE.get(symbol, 0.0001)
-    if best_ticket is not None and best_diff <= pip * 20:
+    tolerance_pips = 200 if symbol in ("XAU/USD", "BTC/USD") else 30
+    if best_ticket is not None and best_diff <= pip * tolerance_pips:
         return best_ticket
     return None
