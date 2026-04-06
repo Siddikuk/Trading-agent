@@ -57,27 +57,39 @@ class EconomicEvent:
 
 def _parse_event_time(date_str: str, time_str: str) -> Optional[datetime]:
     """
-    Parse ForexFactory date ("Apr 10, 2025") + time ("8:30am") → UTC datetime.
-    FF times are US Eastern (UTC-4 in summer, UTC-5 in winter).
+    Parse ForexFactory datetime into UTC.
+    The API now returns ISO 8601 in the date field: "2026-04-06T10:00:00-04:00"
+    Falls back to legacy "Apr 06, 2026" + "10:00am" format just in case.
     """
+    import re as _re
+
     try:
+        date_str = (date_str or "").strip()
+
+        # ── ISO 8601 with offset: "2026-04-06T10:00:00-04:00" ────────────────
+        if "T" in date_str:
+            m = _re.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2})$", date_str)
+            if m:
+                naive = datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S")
+                sign = 1 if m.group(2)[0] == "+" else -1
+                h, mi = int(m.group(2)[1:3]), int(m.group(2)[4:6])
+                offset = timedelta(hours=h * sign, minutes=mi * sign)
+                return naive.replace(tzinfo=timezone(offset)).astimezone(timezone.utc)
+
+        # ── Legacy: "Apr 06, 2026" + "10:00am" ───────────────────────────────
         clean_time = (time_str or "").strip().lower()
         if not clean_time or clean_time in ("all day", "tentative"):
-            # Treat as early morning ET so it counts as "today"
             dt_naive = datetime.strptime(date_str, "%b %d, %Y").replace(hour=8)
         else:
             dt_naive = datetime.strptime(f"{date_str} {time_str.upper()}", "%b %d, %Y %I:%M%p")
 
-        # Determine ET offset (DST: second Sunday Mar → first Sunday Nov = UTC-4)
         try:
             from zoneinfo import ZoneInfo
             et = ZoneInfo("America/New_York")
-            dt = dt_naive.replace(tzinfo=et).astimezone(timezone.utc)
+            return dt_naive.replace(tzinfo=et).astimezone(timezone.utc)
         except Exception:
-            # Fallback: rough UTC-4 (EDT, valid ~Mar–Nov)
-            dt = dt_naive.replace(tzinfo=timezone(timedelta(hours=-4))).astimezone(timezone.utc)
+            return dt_naive.replace(tzinfo=timezone(timedelta(hours=-4))).astimezone(timezone.utc)
 
-        return dt
     except Exception as e:
         logger.warning("Calendar time parse error (%s %s): %s", date_str, time_str, e)
         return None
