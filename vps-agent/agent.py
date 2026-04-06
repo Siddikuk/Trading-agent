@@ -30,6 +30,7 @@ from mt5_client import (
 from news import fetch_news
 from signals import analyze_timeframe, calc_mtf_confluence, should_run_claude
 from reasoning import analyse_with_claude, AIDecision
+from economic_calendar import fetch_calendar, news_blackout_reason
 from risk import (
     calc_position_size, calc_risk_reward,
     check_daily_loss, check_drawdown, check_max_positions,
@@ -118,7 +119,7 @@ async def run_cycle() -> dict:
         update_agent_state({"lastScanAt": _now_str()})
         return summary
 
-    # ── 7. Fetch all candles + news in parallel ───────────────────────────────
+    # ── 7. Fetch candles, news, and economic calendar in parallel ─────────────
     logger.info("Fetching candles for %d symbols × %d timeframes…",
                 len(watch_symbols), len(TIMEFRAMES))
     candles_all = await fetch_all_candles(symbols=watch_symbols)
@@ -128,6 +129,10 @@ async def run_cycle() -> dict:
     news_by_sym: dict[str, list] = {}
     for sym, task in news_tasks.items():
         news_by_sym[sym] = await task
+
+    # Fetch economic calendar (cached, 1 h TTL — never blocks on failure)
+    loop = asyncio.get_event_loop()
+    calendar_events = await loop.run_in_executor(None, fetch_calendar)
 
     # ── 8. Pre-filter: run mechanical analysis, discard low-confluence ─────────
     candidates: list[tuple[str, object]] = []   # (symbol, MTFAnalysis)
@@ -214,6 +219,7 @@ async def run_cycle() -> dict:
                 news_by_sym.get(sym, []),
                 balance, risk_pct, max_lots,
                 recent_trades=recent_trades,
+                calendar_events=calendar_events,
             )
 
     decisions = await asyncio.gather(
@@ -278,6 +284,13 @@ async def run_cycle() -> dict:
         if not auto_trade:
             logger.info("Signal only (autoTrade=off): %s %s %.0f%%",
                         decision.direction, sym, decision.confidence)
+            continue
+
+        # ── News blackout gate ───────────────────────────────────────────────
+        blackout = news_blackout_reason(sym, calendar_events)
+        if blackout:
+            logger.info("News blackout %s: %s", sym, blackout)
+            create_audit_log("NEWS_BLACKOUT", sym, {"reason": blackout})
             continue
 
         # ── Execute trade ────────────────────────────────────────────────────

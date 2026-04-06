@@ -235,6 +235,7 @@ def build_prompt(
     risk_pct: float,
     max_lots: float,
     recent_trades: list[dict] | None = None,
+    calendar_events: list | None = None,
 ) -> str:
     entry_ind = mtf.tf_signals.get(ENTRY_TIMEFRAME)
     atr       = entry_ind.indicators["atr"] if entry_ind else current_price * 0.001
@@ -256,6 +257,14 @@ def build_prompt(
     history_section = _build_trade_history_section(recent_trades or [])
     history_block   = f"\n{history_section}\n" if history_section else ""
 
+    # Economic calendar block
+    cal_block = ""
+    if calendar_events is not None:
+        from economic_calendar import filter_for_symbol, format_for_prompt
+        sym_events = filter_for_symbol(symbol, calendar_events)
+        cal_str = format_for_prompt(sym_events)
+        cal_block = f"\nECONOMIC CALENDAR (high/medium impact, next 24h):\n{cal_str}\n"
+
     return f"""Symbol: {symbol} | Price: {current_price:.5f} | MTF Confluence: {confluence_str}
 Account: Balance ${balance:.2f} | Max Risk: {risk_pct:.1f}% | Max Lots: {max_lots:.2f}
 
@@ -263,7 +272,7 @@ Account: Balance ${balance:.2f} | Max Risk: {risk_pct:.1f}% | Max Lots: {max_lot
 
 NEWS & SENTIMENT ({len(news)} articles, last 24h):
 {news_str}
-{history_block}
+{cal_block}{history_block}
 RISK GUIDANCE (based on {ENTRY_TIMEFRAME} ATR={atr:.5f}):
 BUY scenario  → SL: {suggested_sl_buy:.5f}  TP: {suggested_tp_buy:.5f}
 SELL scenario → SL: {suggested_sl_sell:.5f}  TP: {suggested_tp_sell:.5f}
@@ -423,6 +432,7 @@ async def analyse_with_claude(
     risk_pct: float,
     max_lots: float,
     recent_trades: list[dict] | None = None,
+    calendar_events: list | None = None,
 ) -> AIDecision:
     """
     Build the multi-TF prompt, call Claude, parse the decision.
@@ -434,6 +444,7 @@ async def analyse_with_claude(
         candles_by_tf, news,
         balance, risk_pct, max_lots,
         recent_trades=recent_trades,
+        calendar_events=calendar_events,
     )
     logger.debug("Claude prompt length: %d chars", len(prompt))
 
