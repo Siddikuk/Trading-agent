@@ -66,7 +66,7 @@ def _parse_event_time(date_str: str, time_str: str) -> Optional[datetime]:
             # Treat as early morning ET so it counts as "today"
             dt_naive = datetime.strptime(date_str, "%b %d, %Y").replace(hour=8)
         else:
-            dt_naive = datetime.strptime(f"{date_str} {time_str}", "%b %d, %Y %I:%M%p")
+            dt_naive = datetime.strptime(f"{date_str} {time_str.upper()}", "%b %d, %Y %I:%M%p")
 
         # Determine ET offset (DST: second Sunday Mar → first Sunday Nov = UTC-4)
         try:
@@ -79,7 +79,7 @@ def _parse_event_time(date_str: str, time_str: str) -> Optional[datetime]:
 
         return dt
     except Exception as e:
-        logger.debug("Calendar time parse error (%s %s): %s", date_str, time_str, e)
+        logger.warning("Calendar time parse error (%s %s): %s", date_str, time_str, e)
         return None
 
 
