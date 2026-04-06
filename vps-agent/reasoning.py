@@ -31,7 +31,7 @@ from signals import MTFAnalysis, TFSignal
 
 logger = logging.getLogger(__name__)
 
-_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
 
 
 # ─── Decision output ──────────────────────────────────────────────────────────
@@ -321,7 +321,14 @@ async def _call_claude(prompt: str) -> str:
                     raise
         raise RuntimeError(f"Claude API failed after {CLAUDE_RETRY_ATTEMPTS} attempts")
 
-    return await loop.run_in_executor(None, _sync_call)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _sync_call),
+            timeout=150,  # 2.5 min hard ceiling — SDK timeout is 2 min
+        )
+    except asyncio.TimeoutError:
+        logger.error("Claude API call timed out after 150s for %s — skipping", symbol)
+        raise RuntimeError("Claude API timeout")
 
 
 # ─── JSON parsing ─────────────────────────────────────────────────────────────
