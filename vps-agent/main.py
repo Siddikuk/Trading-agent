@@ -67,7 +67,12 @@ async def _scheduler():
     scan_interval_s = SCAN_INTERVAL_MINUTES * 60
 
     while not _shutdown:
-        state = get_agent_state()
+        try:
+            state = get_agent_state()
+        except Exception as e:
+            logger.error("DB error reading agent state — retrying in 30s: %s", e)
+            await asyncio.sleep(30)
+            continue
 
         if state and state.get("isRunning"):
             cycle_start = time.time()

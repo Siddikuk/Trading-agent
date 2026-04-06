@@ -140,8 +140,18 @@ async def run_cycle() -> dict:
     for sym in watch_symbols:
         sym_check = check_symbol_position(sym)
         if not sym_check.passed:
-            logger.debug("Skip %s: %s", sym, sym_check.reason)
+            logger.info("Skip %s: %s", sym, sym_check.reason)
             summary["symbols_skipped"] += 1
+            # Write HOLD signal so dashboard stays fresh even while a position is open
+            create_signal(
+                symbol=sym, direction="HOLD",
+                confidence=0.0,
+                entry_price=None, stop_loss=None, take_profit=None,
+                strategy="AI-MTF", timeframe=timeframe,
+                indicators={"skip_reason": sym_check.reason,
+                            "reasoning": f"Monitoring open position — {sym_check.reason}"},
+                executed=False,
+            )
             continue
 
         tf_signals = {}
