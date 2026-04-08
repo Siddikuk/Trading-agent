@@ -42,7 +42,7 @@ _SYMBOL_CURRENCIES: dict[str, list[str]] = {
 }
 
 # How many minutes before/after a HIGH impact event to block new trades
-NEWS_BLACKOUT_MINUTES = 30
+NEWS_BLACKOUT_MINUTES = 15
 
 
 @dataclass
