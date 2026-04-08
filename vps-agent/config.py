@@ -80,13 +80,15 @@ def from_mt5_symbol(mt5_sym: str) -> str:
     }
     return pairs.get(upper, mt5_sym)
 
-# Timeframes analysed per symbol (top-down order)
+# Timeframes analysed per symbol (scalper: M5 entry, M15 setup, H1 trend)
 TIMEFRAMES: list[str] = os.getenv(
-    "AGENT_TIMEFRAMES", "M15,H1,H4,D1"
+    "AGENT_TIMEFRAMES", "M5,M15,H1"
 ).split(",")
 
 # Labels shown in prompts / logs
 TF_LABELS: dict[str, str] = {
+    "M1":  "1-Min",
+    "M5":  "5-Min",
     "M15": "15-Min",
     "H1":  "1-Hour",
     "H4":  "4-Hour",
@@ -95,14 +97,16 @@ TF_LABELS: dict[str, str] = {
 
 # Candle counts to fetch per timeframe
 TF_CANDLE_COUNT: dict[str, int] = {
-    "M15": 200,
-    "H1":  200,
-    "H4":  200,
-    "D1":  200,
+    "M1":  100,
+    "M5":  100,
+    "M15": 100,
+    "H1":  100,
+    "H4":  100,
+    "D1":  100,
 }
 
 # Identifies the "entry" timeframe (used for ATR-based SL/TP suggestions)
-ENTRY_TIMEFRAME: str = "H1"
+ENTRY_TIMEFRAME: str = "M5"
 
 # ─── Multi-timeframe confluence ───────────────────────────────────────────────
 MIN_TF_CONFLUENCE: int   = int(os.getenv("AGENT_MIN_TF_CONFLUENCE", "2"))
