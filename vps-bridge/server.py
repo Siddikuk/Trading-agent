@@ -556,7 +556,7 @@ async def place_order(request: dict):
     return {
         "success": True,
         "ticket": result.order,
-        "position_ticket": result.position,  # hedge account position ID (may differ from order)
+        "position_ticket": getattr(result, 'position', None) or result.order,
         "price": round(result.price, symbol_info.digits),
         "volume": result.volume,
         "comment": result.comment,
