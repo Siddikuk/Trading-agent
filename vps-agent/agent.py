@@ -16,6 +16,9 @@ from config import (
     MAX_CONCURRENT_CLAUDE,
     MIN_TF_CONFLUENCE,
     ENTRY_TIMEFRAME,
+    MAX_SL_PIPS,
+    MAX_TP_PIPS,
+    PIP_SIZE,
 )
 from database import (
     get_agent_state, update_agent_state,
@@ -312,6 +315,23 @@ async def run_cycle() -> dict:
             continue
 
         # ── Execute trade ────────────────────────────────────────────────────
+        # Re-check position gate — DB may have changed since pre-filter
+        recheck = check_symbol_position(sym)
+        if not recheck.passed:
+            logger.info("Position gate (re-check) blocked %s: %s", sym, recheck.reason)
+            continue
+
+        # Enforce hard pip caps on Claude's SL/TP (prevents oversized targets)
+        _pip     = PIP_SIZE.get(sym, 0.0001)
+        _max_sl  = MAX_SL_PIPS.get(sym, MAX_SL_PIPS["default"]) * _pip
+        _max_tp  = MAX_TP_PIPS.get(sym, MAX_TP_PIPS["default"]) * _pip
+        if decision.direction == "BUY":
+            decision.stop_loss   = max(decision.stop_loss,   decision.entry_price - _max_sl)
+            decision.take_profit = min(decision.take_profit,  decision.entry_price + _max_tp)
+        else:
+            decision.stop_loss   = min(decision.stop_loss,   decision.entry_price + _max_sl)
+            decision.take_profit = max(decision.take_profit,  decision.entry_price - _max_tp)
+
         rr = calc_risk_reward(decision.entry_price, decision.stop_loss, decision.take_profit)
         rr_check = check_confidence_and_rr(decision.confidence, rr)
         if not rr_check.passed:

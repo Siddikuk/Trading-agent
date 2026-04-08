@@ -36,7 +36,7 @@ BRIDGE_TIMEOUT_S: int = 10   # seconds for regular requests
 ORDER_TIMEOUT_S: int  = 15   # seconds for order/close requests
 
 # ─── Agent timing ─────────────────────────────────────────────────────────────
-SCAN_INTERVAL_MINUTES: int  = int(os.getenv("AGENT_SCAN_INTERVAL_MINUTES", "15"))
+SCAN_INTERVAL_MINUTES: int  = int(os.getenv("AGENT_SCAN_INTERVAL_MINUTES", "5"))
 IDLE_POLL_SECONDS: int      = 60   # how often to check isRunning when stopped
 BRIDGE_RETRY_LIMIT: int     = 3    # consecutive failures before halting
 
@@ -126,18 +126,30 @@ MIN_LOT: float     = 0.01
 MAX_LOT: float     = float(os.getenv("AGENT_MAX_LOT", "0.10"))  # cent account default
 
 # ─── Trade decision gates (hardcoded — not user-configurable) ─────────────────
-MIN_CONFIDENCE_TO_TRADE: int    = 60    # Claude confidence threshold
-MIN_RISK_REWARD: float          = 2.0   # Minimum R:R ratio
+MIN_CONFIDENCE_TO_TRADE: int    = 55    # Claude confidence threshold (scalper)
+MIN_RISK_REWARD: float          = 1.5   # Minimum R:R ratio (scalper)
 MIN_CONFIDENCE_TO_SIGNAL: int   = 50    # Write to DB even if not trading
 
 # ─── Trade management (breakeven / trailing) ─────────────────────────────────
-BREAKEVEN_TRIGGER_PIPS: float   = 20.0  # move SL to entry after this many pips profit
-TRAILING_TRIGGER_PIPS: float    = 40.0  # trail SL after this many pips profit
-TRAILING_OFFSET_PIPS: float     = 10.0  # trail SL this many pips behind price (default)
-# Per-symbol overrides — BTC/Gold need larger buffers due to spread & broker stop levels
+BREAKEVEN_TRIGGER_PIPS: float   = 10.0  # move SL to entry after this many pips profit
+TRAILING_TRIGGER_PIPS: float    = 20.0  # trail SL after this many pips profit
+TRAILING_OFFSET_PIPS: float     = 5.0   # trail SL this many pips behind price (default)
+# Per-symbol overrides
 TRAILING_OFFSET_BY_SYMBOL: dict[str, float] = {
     "BTC/USD": 100,  # $100 buffer — BTC minimum stop level is large on most brokers
-    "XAU/USD": 50,   # 50 pip ($5) buffer for gold
+    "XAU/USD": 10,   # 10 pip ($1) buffer for gold scalping
+}
+
+# ─── Hard SL/TP pip caps (prevents oversized targets) ────────────────────────
+MAX_SL_PIPS: dict[str, float] = {
+    "XAU/USD": 30,   # max $3 SL on 0.01 lots
+    "BTC/USD": 200,
+    "default": 20,   # forex pairs
+}
+MAX_TP_PIPS: dict[str, float] = {
+    "XAU/USD": 60,   # max $6 TP on 0.01 lots (2:1 R:R)
+    "BTC/USD": 400,
+    "default": 40,   # forex pairs
 }
 
 # Pip size per symbol (used for profit/pips calculations)

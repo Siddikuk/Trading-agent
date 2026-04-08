@@ -24,6 +24,9 @@ from config import (
     ENTRY_TIMEFRAME,
     MIN_CONFIDENCE_TO_TRADE,
     MIN_RISK_REWARD,
+    MAX_SL_PIPS,
+    MAX_TP_PIPS,
+    PIP_SIZE,
 )
 from indicators import analyze_price_action
 from news import NewsArticle, format_news_for_prompt
@@ -56,23 +59,23 @@ class AIDecision:
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = f"""You are an expert forex and gold trading analyst with 20+ years of experience.
-You analyse markets using a top-down multi-timeframe approach and make precise, disciplined trade decisions.
+SYSTEM_PROMPT = f"""You are an expert scalp trader specialising in forex and gold (XAU/USD).
+You execute fast, precise trades using intraday price action on M5 charts, confirmed by M15 and H1.
 
 ## Analysis Framework (always follow in this order)
-1. MACRO BIAS (D1): Identify the dominant trend direction and key structural levels
-2. TREND CONFIRMATION (H4): Confirm or question the D1 bias; flag if diverging
-3. ENTRY SIGNAL (H1): Identify the primary trade setup and entry trigger
-4. ENTRY PRECISION (M15): Confirm the entry timing and look for candlestick patterns
-5. NEWS & FUNDAMENTALS: Assess whether news supports or contradicts the technical bias
-6. SYNTHESIS: Only trade when multiple timeframes align. State your conviction clearly.
+1. H1 TREND DIRECTION: Is the hourly trend bullish or bearish? EMAs, MACD direction.
+2. M15 SETUP: Is price pulling back to a key level, breaking out, or ranging? Identify the setup.
+3. M5 ENTRY: Spot the trigger — pin bar, engulfing candle, EMA bounce, momentum shift. This is the entry timeframe.
+4. NEWS CONTEXT: Avoid entering into major scheduled events. Check calendar for imminent releases.
+5. SYNTHESIS: Enter only when M5 signal aligns with M15 setup and H1 trend. Quick in, quick out.
 
 ## Hard Rules
-- NEVER trade against the D1 trend unless the setup is extremely strong (confidence > 80%)
-- Minimum confidence to trade: 60%
-- Minimum Risk:Reward ratio: {MIN_RISK_REWARD} — no exceptions
-- If H1 and M15 both show strong opposing signals to D1, output HOLD
-- Capital preservation beats catching every move
+- Target 20-40 pips on XAU/USD, 15-25 pips on forex pairs — scalp, do not hold for big moves
+- Stop loss: 15-25 pips on XAU/USD, 10-15 pips on forex — keep it tight
+- Minimum confidence to trade: 55%
+- Minimum Risk:Reward ratio: {MIN_RISK_REWARD}
+- Never hold more than one position per symbol
+- If M5 and M15 conflict, output HOLD — do not force entries
 - Account context: cent account with small balance — use provided lot size limits strictly
 
 ## Response Format
@@ -83,12 +86,12 @@ Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
   "entry_price": <float>,
   "stop_loss": <float>,
   "take_profit": <float>,
-  "reasoning": "<full chain of thought — reference each timeframe>",
+  "reasoning": "<chain of thought — H1 trend, M15 setup, M5 trigger>",
   "sentiment_score": <integer -100 to 100>,
   "should_trade": <true | false>,
   "skip_reason": "<why HOLD — empty string if trading>",
   "primary_timeframe": "<which TF drove the entry decision>",
-  "confluence_used": "<e.g. '3/4'>",
+  "confluence_used": "<e.g. '3/3'>",
   "risk_reward": <float>
 }}"""
 
@@ -277,10 +280,15 @@ def build_prompt(
     confluence_str = f"{mtf.confluence_count}/{mtf.total_tfs} {mtf.confluence_direction}"
     news_str       = format_news_for_prompt(news)
 
-    suggested_sl_buy  = current_price - atr * 1.5
-    suggested_sl_sell = current_price + atr * 1.5
-    suggested_tp_buy  = current_price + atr * 3.0   # 3.0 × ATR → 2.0 R:R minimum
-    suggested_tp_sell = current_price - atr * 3.0
+    # Scalper SL/TP: tighter ATR multipliers, capped by hard pip limits
+    pip      = PIP_SIZE.get(symbol, 0.0001)
+    max_sl   = MAX_SL_PIPS.get(symbol, MAX_SL_PIPS["default"]) * pip
+    max_tp   = MAX_TP_PIPS.get(symbol, MAX_TP_PIPS["default"]) * pip
+
+    suggested_sl_buy  = max(current_price - atr * 0.8, current_price - max_sl)
+    suggested_sl_sell = min(current_price + atr * 0.8, current_price + max_sl)
+    suggested_tp_buy  = min(current_price + atr * 1.6, current_price + max_tp)
+    suggested_tp_sell = max(current_price - atr * 1.6, current_price - max_tp)
 
     history_section = _build_trade_history_section(recent_trades or [])
     history_block   = f"\n{history_section}\n" if history_section else ""
@@ -319,10 +327,11 @@ Account: Balance ${balance:.2f} | Max Risk: {risk_pct:.1f}% | Max Lots: {max_lot
 NEWS & SENTIMENT ({len(news)} articles, last 24h):
 {news_str}
 {cal_block}{open_block}{history_block}
-RISK GUIDANCE (based on {ENTRY_TIMEFRAME} ATR={atr:.5f}):
+SCALP GUIDANCE (based on {ENTRY_TIMEFRAME} ATR={atr:.5f}):
 BUY scenario  → SL: {suggested_sl_buy:.5f}  TP: {suggested_tp_buy:.5f}
 SELL scenario → SL: {suggested_sl_sell:.5f}  TP: {suggested_tp_sell:.5f}
 Max lot for {risk_pct:.1f}% risk: {max_lots:.2f}
+SL cap: {MAX_SL_PIPS.get(symbol, MAX_SL_PIPS["default"]):.0f} pips | TP cap: {MAX_TP_PIPS.get(symbol, MAX_TP_PIPS["default"]):.0f} pips — do not exceed these
 
 Respond in JSON only."""
 
