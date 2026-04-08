@@ -321,16 +321,35 @@ async def run_cycle() -> dict:
             logger.info("Position gate (re-check) blocked %s: %s", sym, recheck.reason)
             continue
 
-        # Enforce hard pip caps on Claude's SL/TP (prevents oversized targets)
+        # Fetch live price right before order — Claude may have taken 60+ seconds,
+        # market could have moved significantly since entry_price was estimated.
         _pip     = PIP_SIZE.get(sym, 0.0001)
-        _max_sl  = MAX_SL_PIPS.get(sym, MAX_SL_PIPS["default"]) * _pip
-        _max_tp  = MAX_TP_PIPS.get(sym, MAX_TP_PIPS["default"]) * _pip
+        _sl_pips = MAX_SL_PIPS.get(sym, MAX_SL_PIPS["default"])
+        _tp_pips = MAX_TP_PIPS.get(sym, MAX_TP_PIPS["default"])
+        try:
+            live_quotes = await fetch_quotes([sym])
+            q = live_quotes.get(sym, {})
+            if q:
+                # Use bid for SELL entry, ask for BUY entry
+                live_price = float(
+                    q.get("bid") if decision.direction == "SELL"
+                    else q.get("ask") or q.get("bid") or decision.entry_price
+                )
+                logger.info(
+                    "Live price for %s before order: %.5f (Claude had %.5f)",
+                    sym, live_price, decision.entry_price,
+                )
+                decision.entry_price = live_price
+        except Exception as _lp_err:
+            logger.warning("Live price fetch failed for %s — using Claude entry: %s", sym, _lp_err)
+
+        # Set SL/TP as fixed pip distances from live entry price
         if decision.direction == "BUY":
-            decision.stop_loss   = max(decision.stop_loss,   decision.entry_price - _max_sl)
-            decision.take_profit = min(decision.take_profit,  decision.entry_price + _max_tp)
+            decision.stop_loss   = decision.entry_price - _sl_pips * _pip
+            decision.take_profit = decision.entry_price + _tp_pips * _pip
         else:
-            decision.stop_loss   = min(decision.stop_loss,   decision.entry_price + _max_sl)
-            decision.take_profit = max(decision.take_profit,  decision.entry_price - _max_tp)
+            decision.stop_loss   = decision.entry_price + _sl_pips * _pip
+            decision.take_profit = decision.entry_price - _tp_pips * _pip
 
         rr = calc_risk_reward(decision.entry_price, decision.stop_loss, decision.take_profit)
         rr_check = check_confidence_and_rr(decision.confidence, rr)
