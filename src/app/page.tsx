@@ -159,7 +159,7 @@ function Toggle({ on, onChange, color = 'emerald', disabled = false }: {
 
 // ─── Countdown ────────────────────────────────────────────────────────────────
 
-function useCountdown(lastScanAt: string | null, intervalMinutes = 15): string {
+function useCountdown(lastScanAt: string | null, intervalMinutes = 5): string {
   const [display, setDisplay] = useState('—');
   useEffect(() => {
     const tick = () => {
