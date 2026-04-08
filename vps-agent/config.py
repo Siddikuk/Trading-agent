@@ -36,7 +36,7 @@ BRIDGE_TIMEOUT_S: int = 10   # seconds for regular requests
 ORDER_TIMEOUT_S: int  = 15   # seconds for order/close requests
 
 # ─── Agent timing ─────────────────────────────────────────────────────────────
-SCAN_INTERVAL_MINUTES: int  = int(os.getenv("AGENT_SCAN_INTERVAL_MINUTES", "5"))
+SCAN_INTERVAL_MINUTES: int  = 5
 IDLE_POLL_SECONDS: int      = 60   # how often to check isRunning when stopped
 BRIDGE_RETRY_LIMIT: int     = 3    # consecutive failures before halting
 
@@ -81,9 +81,7 @@ def from_mt5_symbol(mt5_sym: str) -> str:
     return pairs.get(upper, mt5_sym)
 
 # Timeframes analysed per symbol (scalper: M5 entry, M15 setup, H1 trend)
-TIMEFRAMES: list[str] = os.getenv(
-    "AGENT_TIMEFRAMES", "M5,M15,H1"
-).split(",")
+TIMEFRAMES: list[str] = ["M5", "M15", "H1"]
 
 # Labels shown in prompts / logs
 TF_LABELS: dict[str, str] = {
