@@ -101,12 +101,32 @@ def fetch_calendar() -> list[EconomicEvent]:
     Return upcoming high/medium impact events for this week + next week.
     Fetches both URLs so weekend scans still see Monday's events.
     Results cached for 1 hour. Returns [] on any network/parse error.
+
+    minutes_away is always recomputed from event_utc before returning so it
+    never goes stale even when serving from the 1-hour cache.
     """
     global _cache
 
     now = time.time()
     if _cache and (now - _cache[0]) < _CACHE_TTL:
-        return _cache[1]
+        # Recompute minutes_away from the stored UTC timestamp so callers
+        # always see a fresh value, not the one from 55 minutes ago.
+        now_dt = datetime.now(timezone.utc)
+        fresh: list[EconomicEvent] = []
+        for e in _cache[1]:
+            if e.event_utc:
+                try:
+                    event_dt = datetime.fromisoformat(e.event_utc)
+                    minutes_away = int((event_dt - now_dt).total_seconds() / 60)
+                    # Drop events that have moved outside the relevant window
+                    if minutes_away < -60 or minutes_away > 2880:
+                        continue
+                    e.minutes_away = minutes_away
+                except Exception:
+                    pass
+            fresh.append(e)
+        fresh.sort(key=lambda ev: ev.minutes_away)
+        return fresh
 
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
