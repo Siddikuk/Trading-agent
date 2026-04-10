@@ -305,15 +305,19 @@ def create_signal(
     symbol: str,
     direction: str,
     confidence: float,
-    entry_price: float,
-    stop_loss: float,
-    take_profit: float,
+    entry_price: Optional[float],
+    stop_loss: Optional[float],
+    take_profit: Optional[float],
     strategy: str,
     timeframe: str,
     indicators: dict,
     executed: bool = False,
     trade_id: Optional[str] = None,
 ) -> str:
+    # HOLD signals have no price levels — use 0.0 to satisfy NOT NULL constraint
+    entry_price = entry_price if entry_price is not None else 0.0
+    stop_loss   = stop_loss   if stop_loss   is not None else 0.0
+    take_profit = take_profit if take_profit is not None else 0.0
     sig_id = str(uuid.uuid4())
     with _conn() as conn:
         with conn.cursor() as cur:
