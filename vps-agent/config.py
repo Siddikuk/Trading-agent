@@ -107,7 +107,7 @@ TF_CANDLE_COUNT: dict[str, int] = {
 ENTRY_TIMEFRAME: str = "M5"
 
 # ─── Multi-timeframe confluence ───────────────────────────────────────────────
-MIN_TF_CONFLUENCE: int   = int(os.getenv("AGENT_MIN_TF_CONFLUENCE", "2"))
+MIN_TF_CONFLUENCE: int   = 3              # all 3 TFs must agree (hardcoded — not env-overridable)
 LOT_SCALE_3TF: float     = float(os.getenv("AGENT_LOT_SCALE_3TF", "1.5"))
 LOT_SCALE_4TF: float     = float(os.getenv("AGENT_LOT_SCALE_4TF", "2.0"))
 
@@ -124,13 +124,13 @@ MIN_LOT: float     = 0.01
 MAX_LOT: float     = float(os.getenv("AGENT_MAX_LOT", "0.10"))  # cent account default
 
 # ─── Trade decision gates (hardcoded — not user-configurable) ─────────────────
-MIN_CONFIDENCE_TO_TRADE: int    = 55    # Claude confidence threshold (scalper)
+MIN_CONFIDENCE_TO_TRADE: int    = 65    # Claude confidence threshold — only A+ setups
 MIN_RISK_REWARD: float          = 1.5   # Minimum R:R ratio (scalper)
 MIN_CONFIDENCE_TO_SIGNAL: int   = 50    # Write to DB even if not trading
 
 # ─── Trade management (breakeven / trailing) ─────────────────────────────────
-BREAKEVEN_TRIGGER_PIPS: float   = 10.0  # move SL to entry after this many pips profit
-TRAILING_TRIGGER_PIPS: float    = 20.0  # trail SL after this many pips profit
+BREAKEVEN_TRIGGER_PIPS: float   = 15.0  # move SL to entry after this many pips profit
+TRAILING_TRIGGER_PIPS: float    = 25.0  # trail SL after this many pips profit
 TRAILING_OFFSET_PIPS: float     = 5.0   # trail SL this many pips behind price (default)
 # Per-symbol overrides
 TRAILING_OFFSET_BY_SYMBOL: dict[str, float] = {
@@ -145,9 +145,9 @@ MAX_SL_PIPS: dict[str, float] = {
     "default": 20,   # forex pairs
 }
 MAX_TP_PIPS: dict[str, float] = {
-    "XAU/USD": 60,   # max $6 TP on 0.01 lots (2:1 R:R)
+    "XAU/USD": 75,   # max $7.50 TP on 0.01 lots (2.5:1 R:R)
     "BTC/USD": 400,
-    "default": 40,   # forex pairs
+    "default": 45,   # forex pairs
 }
 
 # Pip size per symbol (used for profit/pips calculations)

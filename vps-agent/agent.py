@@ -114,6 +114,17 @@ async def run_cycle() -> dict:
     # ── 5. Trade management ──────────────────────────────────────────────────
     await manage_open_trades(mt5_positions)
 
+    # ── 5b. Session filter — no new entries outside London/NY hours ──────────
+    from datetime import datetime, timezone as _tz
+    _utc_hour = datetime.now(_tz.utc).hour
+    if not (7 <= _utc_hour < 20):
+        logger.info(
+            "Off-session (%02d:xx UTC) — trade management done, skipping new entries",
+            _utc_hour,
+        )
+        update_agent_state({"lastScanAt": _now_str()})
+        return summary
+
     # ── 6. Check if we can scan (max positions) ───────────────────────────────
     pos_check = check_max_positions(state)
     if not pos_check.passed:
