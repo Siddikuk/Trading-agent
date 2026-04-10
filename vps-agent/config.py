@@ -107,7 +107,7 @@ TF_CANDLE_COUNT: dict[str, int] = {
 ENTRY_TIMEFRAME: str = "M5"
 
 # ─── Multi-timeframe confluence ───────────────────────────────────────────────
-MIN_TF_CONFLUENCE: int   = 3              # all 3 TFs must agree (hardcoded — not env-overridable)
+MIN_TF_CONFLUENCE: int   = 2              # M5+M15 must agree; H1 is context only for Claude
 LOT_SCALE_3TF: float     = float(os.getenv("AGENT_LOT_SCALE_3TF", "1.5"))
 LOT_SCALE_4TF: float     = float(os.getenv("AGENT_LOT_SCALE_4TF", "2.0"))
 
