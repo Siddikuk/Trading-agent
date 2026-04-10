@@ -129,23 +129,23 @@ MIN_RISK_REWARD: float          = 1.5   # Minimum R:R ratio (scalper)
 MIN_CONFIDENCE_TO_SIGNAL: int   = 50    # Write to DB even if not trading
 
 # ─── Trade management (breakeven / trailing) ─────────────────────────────────
-BREAKEVEN_TRIGGER_PIPS: float   = 15.0  # move SL to entry after this many pips profit
-TRAILING_TRIGGER_PIPS: float    = 25.0  # trail SL after this many pips profit
+BREAKEVEN_TRIGGER_PIPS: float   = 30.0  # move SL to entry after this many pips profit
+TRAILING_TRIGGER_PIPS: float    = 55.0  # trail SL only when close to TP (not at halfway)
 TRAILING_OFFSET_PIPS: float     = 5.0   # trail SL this many pips behind price (default)
 # Per-symbol overrides
 TRAILING_OFFSET_BY_SYMBOL: dict[str, float] = {
     "BTC/USD": 100,  # $100 buffer — BTC minimum stop level is large on most brokers
-    "XAU/USD": 10,   # 10 pip ($1) buffer for gold scalping
+    "XAU/USD": 20,   # 20 pip buffer — gives room for normal retracements before TP
 }
 
 # ─── Hard SL/TP pip caps (prevents oversized targets) ────────────────────────
 MAX_SL_PIPS: dict[str, float] = {
-    "XAU/USD": 30,   # max $3 SL on 0.01 lots
+    "XAU/USD": 40,   # 40 pips = $4 on 0.01 lots — room for M5 noise (~15-20 pip ATR)
     "BTC/USD": 200,
     "default": 20,   # forex pairs
 }
 MAX_TP_PIPS: dict[str, float] = {
-    "XAU/USD": 75,   # max $7.50 TP on 0.01 lots (2.5:1 R:R)
+    "XAU/USD": 80,   # 80 pips = $8 on 0.01 lots (2:1 R:R)
     "BTC/USD": 400,
     "default": 45,   # forex pairs
 }
