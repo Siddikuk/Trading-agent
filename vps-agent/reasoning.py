@@ -421,17 +421,17 @@ def _parse_decision(raw: str, symbol: str, current_price: float) -> AIDecision:
     if direction not in ("BUY", "SELL", "HOLD"):
         direction = "HOLD"
 
-    confidence   = float(data.get("confidence", 0))
-    entry_price  = float(data.get("entry_price", current_price))
-    stop_loss    = float(data.get("stop_loss", 0))
-    take_profit  = float(data.get("take_profit", 0))
-    reasoning    = str(data.get("reasoning", ""))
-    sentiment    = float(data.get("sentiment_score", 0))
+    confidence   = float(data.get("confidence") or 0)
+    entry_price  = float(data.get("entry_price") or current_price)
+    stop_loss    = float(data.get("stop_loss") or 0)
+    take_profit  = float(data.get("take_profit") or 0)
+    reasoning    = str(data.get("reasoning") or "")
+    sentiment    = float(data.get("sentiment_score") or 0)
     should_trade = bool(data.get("should_trade", False))
-    skip_reason  = str(data.get("skip_reason", ""))
-    primary_tf   = str(data.get("primary_timeframe", ENTRY_TIMEFRAME))
-    confluence   = str(data.get("confluence_used", ""))
-    rr           = float(data.get("risk_reward", 0))
+    skip_reason  = str(data.get("skip_reason") or "")
+    primary_tf   = str(data.get("primary_timeframe") or ENTRY_TIMEFRAME)
+    confluence   = str(data.get("confluence_used") or "")
+    rr           = float(data.get("risk_reward") or 0)
 
     # Validate prices are sensible
     if direction in ("BUY", "SELL"):
