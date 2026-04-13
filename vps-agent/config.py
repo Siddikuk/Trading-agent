@@ -124,7 +124,7 @@ MIN_LOT: float     = 0.01
 MAX_LOT: float     = float(os.getenv("AGENT_MAX_LOT", "0.10"))  # cent account default
 
 # ─── Trade decision gates (hardcoded — not user-configurable) ─────────────────
-MIN_CONFIDENCE_TO_TRADE: int    = 65    # Claude confidence threshold — only A+ setups
+MIN_CONFIDENCE_TO_TRADE: int    = 62    # Claude confidence threshold
 MIN_RISK_REWARD: float          = 1.5   # Minimum R:R ratio (scalper)
 MIN_CONFIDENCE_TO_SIGNAL: int   = 50    # Write to DB even if not trading
 
