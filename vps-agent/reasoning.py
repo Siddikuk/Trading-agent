@@ -80,6 +80,18 @@ You execute fast, precise trades using M5 price action, confirmed by M15 and H1 
 - H1 is trend context only. A counter-H1 trade on strong M5+M15 alignment is acceptable but reduce confidence by 10-15 points.
 - Account context: cent account with small balance — use provided lot size limits strictly
 
+## Stochastic / Momentum Hard Filters (non-negotiable)
+- M15 Stochastic K < 25 → market is OVERSOLD → NEVER SELL. Wait for bounce confirmation before any entry.
+- M15 Stochastic K > 75 → market is OVERBOUGHT → NEVER BUY. Wait for rejection confirmation before any entry.
+- These rules exist because selling an oversold market and buying an overbought market are the most common causes of stopped-out scalp trades.
+- If the M15 Stoch conflicts with your intended direction → output HOLD regardless of other signals.
+
+## Price Range Context
+- Always check where current price sits in the M15 20-candle range (provided in prompt).
+- Price in bottom 20% of range: high reversal risk for SELL entries — need extra confirmation.
+- Price in top 20% of range: high reversal risk for BUY entries — need extra confirmation.
+- Trading in the middle 60% of range has the best risk/reward for scalps.
+
 ## ADX Guidance (not a hard block — use judgement)
 - ADX < 15 on BOTH M15 AND H1: strong ranging signal → reduce confidence significantly
 - ADX < 20 on one timeframe only: note it, but do not automatically HOLD if EMA alignment and MACD confirm direction clearly — early trends and breakouts naturally start with low ADX
@@ -287,6 +299,36 @@ def build_prompt(
     confluence_str = f"{mtf.confluence_count}/{mtf.total_tfs} {mtf.confluence_direction}"
     news_str       = format_news_for_prompt(news)
 
+    # M15 20-candle price range — shows Claude if price is at range extreme
+    m15_candles = candles_by_tf.get("M15", [])
+    range_block = ""
+    if len(m15_candles) >= 20:
+        recent = m15_candles[-20:]
+        r_high = max(c["high"] for c in recent)
+        r_low  = min(c["low"]  for c in recent)
+        r_range = r_high - r_low
+        r_pct   = int((current_price - r_low) / r_range * 100) if r_range > 0 else 50
+        if r_pct <= 20:
+            r_label = "⚠️ BOTTOM of range — high reversal risk for SELL"
+        elif r_pct >= 80:
+            r_label = "⚠️ TOP of range — high reversal risk for BUY"
+        else:
+            r_label = "✓ Mid-range — favourable entry zone"
+        range_block = (
+            f"\nM15 20-CANDLE RANGE: High={r_high:.3f} Low={r_low:.3f} "
+            f"| Current at {r_pct}% of range {r_label}\n"
+        )
+
+    # M15 Stochastic warning — pre-compute for Claude's awareness
+    m15_sig = mtf.tf_signals.get("M15")
+    stoch_block = ""
+    if m15_sig:
+        sk = m15_sig.indicators.get("stoch_k", 50)
+        if sk < 25:
+            stoch_block = f"\n⚠️ M15 STOCHASTIC OVERSOLD (K={sk:.1f}) — HARD RULE: NO SELL entries.\n"
+        elif sk > 75:
+            stoch_block = f"\n⚠️ M15 STOCHASTIC OVERBOUGHT (K={sk:.1f}) — HARD RULE: NO BUY entries.\n"
+
     # Scalper SL/TP: tighter ATR multipliers, capped by hard pip limits
     pip      = PIP_SIZE.get(symbol, 0.0001)
     max_sl   = MAX_SL_PIPS.get(symbol, MAX_SL_PIPS["default"]) * pip
@@ -328,7 +370,7 @@ def build_prompt(
 
     return f"""Symbol: {symbol} | Price: {current_price:.5f} | MTF Confluence: {confluence_str}
 Account: Balance ${balance:.2f} | Max Risk: {risk_pct:.1f}% | Max Lots: {max_lots:.2f}
-
+{range_block}{stoch_block}
 {chr(10).join(tf_blocks)}
 
 NEWS & SENTIMENT ({len(news)} articles, last 24h):
