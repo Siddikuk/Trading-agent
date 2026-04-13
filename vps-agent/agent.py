@@ -27,7 +27,7 @@ from database import (
 )
 from mt5_client import (
     ping_bridge, fetch_account_and_positions,
-    fetch_all_candles, fetch_quotes, place_order,
+    fetch_all_candles, fetch_quotes, place_order, modify_position_sl,
 )
 from news import fetch_news
 from signals import analyze_timeframe, calc_mtf_confluence, should_run_claude
@@ -393,6 +393,28 @@ async def run_cycle() -> dict:
         if order_result.get("success"):
             ticket = order_result.get("position_ticket") or order_result.get("ticket")
             fill_price = float(order_result.get("price", decision.entry_price))
+
+            # Post-fill SL adjustment — if market moved between our price fetch and
+            # the actual fill, recalculate SL/TP from the real fill price.
+            fill_sl_dist = abs(fill_price - decision.stop_loss) / _pip
+            if fill_sl_dist < _sl_pips * 0.80:  # SL is less than 80% of intended distance
+                if decision.direction == "BUY":
+                    decision.stop_loss   = fill_price - _sl_pips * _pip
+                    decision.take_profit = fill_price + _tp_pips * _pip
+                else:
+                    decision.stop_loss   = fill_price + _sl_pips * _pip
+                    decision.take_profit = fill_price - _tp_pips * _pip
+                logger.info(
+                    "Fill slippage on %s: quoted=%.5f fill=%.5f (%.1f pips) "
+                    "— adjusting SL to %.5f TP to %.5f",
+                    sym, decision.entry_price, fill_price,
+                    abs(fill_price - decision.entry_price) / _pip,
+                    decision.stop_loss, decision.take_profit,
+                )
+                if ticket:
+                    await modify_position_sl(
+                        int(ticket), sym, decision.stop_loss, decision.take_profit
+                    )
 
             trade_id = create_trade(
                 symbol=sym,
