@@ -251,6 +251,33 @@ def _trend_strategy(price: float, ind: IndicatorValues, candles: list[Candle]) -
     return None
 
 
+def _candle_momentum_signal(
+    price: float, ind: "IndicatorValues", candles: list["Candle"]
+) -> Optional["SignalResult"]:
+    """
+    Detects sustained directional momentum by counting candle direction.
+    Fires when 4 of the last 5 candles agree — captures fast trend continuation
+    that RSI/BB miss because those strategies are mean-reversion biased.
+    """
+    if len(candles) < 5:
+        return None
+    recent = candles[-5:]
+    atr = ind["atr"] or price * 0.001
+    bearish = sum(1 for c in recent if c["close"] < c["open"])
+    bullish = sum(1 for c in recent if c["close"] > c["open"])
+    if bearish >= 4:
+        return SignalResult("SELL", 68.0, price,
+                            price + atr * 1.5, price - atr * 2.5,
+                            [f"{bearish}/5 bearish candles — sustained downward momentum"],
+                            "CandleMomentum")
+    if bullish >= 4:
+        return SignalResult("BUY", 68.0, price,
+                            price - atr * 1.5, price + atr * 2.5,
+                            [f"{bullish}/5 bullish candles — sustained upward momentum"],
+                            "CandleMomentum")
+    return None
+
+
 # ─── Per-timeframe signal combiner ───────────────────────────────────────────
 
 def combine_signals(results: list[SignalResult], price: float, atr: float) -> SignalResult:
@@ -310,6 +337,7 @@ def analyze_timeframe(
         _macd_strategy(price, ind, candles),
         _bollinger_strategy(price, ind, candles),
         _trend_strategy(price, ind, candles),
+        _candle_momentum_signal(price, ind, candles),
     ]
 
     combined = combine_signals([s for s in raw_signals if s is not None], price, atr)
