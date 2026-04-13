@@ -86,6 +86,12 @@ You execute fast, precise trades using M5 price action, confirmed by M15 and H1 
 - These rules exist because selling an oversold market and buying an overbought market are the most common causes of stopped-out scalp trades.
 - If the M15 Stoch conflicts with your intended direction → output HOLD regardless of other signals.
 
+## Pullback Entry Rule (critical for timing)
+- NEVER enter in the direction of a move that has already extended far from EMA9 on M5.
+- For SELL: price must be AT or NEAR M5 EMA9 from above (within ~10 pips), rolling over. Do NOT sell when price is already 15+ pips below EMA9 — the impulse is spent, pullback is coming.
+- For BUY: price must be AT or NEAR M5 EMA9 from below (within ~10 pips), bouncing. Do NOT buy when price is already 15+ pips above EMA9 — the impulse is spent, pullback is coming.
+- The EMA9 distance is shown in the M5 block. "⚠️ impulse extended" = HOLD, wait for pullback.
+
 ## Price Range Context
 - Always check where current price sits in the M15 20-candle range (provided in prompt).
 - Price in bottom 20% of range: high reversal risk for SELL entries — need extra confirmation.
@@ -162,6 +168,17 @@ def _bb_position(price: float, upper: float, mid: float, lower: float) -> str:
     return f"→ Mid-band ({pct:.0f}%)"
 
 
+def _ema9_distance(price: float, ema9: float, pip: float) -> str:
+    """Show how far price is from EMA9 — key for detecting late entries."""
+    dist_pips = (price - ema9) / pip if pip > 0 else 0
+    if abs(dist_pips) <= 8:
+        return f"✓ AT EMA9 ({dist_pips:+.1f} pips) — pullback zone, good entry"
+    elif dist_pips < -8:
+        return f"⚠️ {abs(dist_pips):.0f} pips BELOW EMA9 — impulse extended, late SELL risk"
+    else:
+        return f"⚠️ {dist_pips:.0f} pips ABOVE EMA9 — impulse extended, late BUY risk"
+
+
 def _format_tf_block(tf: str, sig: TFSignal, candles: list) -> str:
     ind    = sig.indicators
     label  = TF_LABELS.get(tf, tf)
@@ -175,10 +192,17 @@ def _format_tf_block(tf: str, sig: TFSignal, candles: list) -> str:
 
     price_action = analyze_price_action(candles) if len(candles) >= 10 else "–"
 
+    from config import PIP_SIZE as _PS
+    _pip = _PS.get("XAU/USD", 0.1) if "XAU" in str(sig.entry_price) or sig.entry_price > 1000 else 0.0001
+    ema9_line = (
+        f"\n│ EMA9 dist: {_ema9_distance(sig.entry_price, ind['ema9'], _pip)}"
+        if tf == ENTRY_TIMEFRAME else ""
+    )
+
     return f"""┌─ {tf} ({label}) {"─" * max(1, 46 - len(tf) - len(label))}┐
 │ RSI: {ind['rsi']:.1f} [{_annotate_rsi(ind['rsi'])}]
 │ MACD: Hist={ind['macd_hist']:+.5f} [{_annotate_macd(ind['macd_hist'])}] | Line={ind['macd_line']:.5f}
-│ EMA: {_ema_alignment(ind)}
+│ EMA: {_ema_alignment(ind)}{ema9_line}
 │ Bollinger: {_bb_position(sig.entry_price, ind['bb_upper'], ind['bb_mid'], ind['bb_lower'])}
 │ ADX: {ind['adx']:.1f} [{_annotate_adx(ind['adx'])}] | ATR: {ind['atr']:.5f}
 │ Stoch K/D: {ind['stoch_k']:.1f}/{ind['stoch_d']:.1f}
