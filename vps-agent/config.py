@@ -107,7 +107,7 @@ TF_CANDLE_COUNT: dict[str, int] = {
 ENTRY_TIMEFRAME: str = "M5"
 
 # ─── Multi-timeframe confluence ───────────────────────────────────────────────
-MIN_TF_CONFLUENCE: int   = 2              # M5+M15 must agree; H1 is context only for Claude
+MIN_TF_CONFLUENCE: int   = 1              # M5 signal is enough to call Claude; M15+H1 are context
 LOT_SCALE_3TF: float     = float(os.getenv("AGENT_LOT_SCALE_3TF", "1.5"))
 LOT_SCALE_4TF: float     = float(os.getenv("AGENT_LOT_SCALE_4TF", "2.0"))
 
@@ -124,7 +124,7 @@ MIN_LOT: float     = 0.01
 MAX_LOT: float     = float(os.getenv("AGENT_MAX_LOT", "0.10"))  # cent account default
 
 # ─── Trade decision gates (hardcoded — not user-configurable) ─────────────────
-MIN_CONFIDENCE_TO_TRADE: int    = 62    # Claude confidence threshold
+MIN_CONFIDENCE_TO_TRADE: int    = 58    # Claude confidence threshold
 MIN_RISK_REWARD: float          = 1.5   # Minimum R:R ratio (scalper)
 MIN_CONFIDENCE_TO_SIGNAL: int   = 50    # Write to DB even if not trading
 

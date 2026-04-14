@@ -369,16 +369,28 @@ def calc_mtf_confluence(
         if sig.direction in ("BUY", "SELL")
     }
 
-    buy_count  = sum(1 for s in valid_sigs.values() if s.direction == "BUY")
-    sell_count = sum(1 for s in valid_sigs.values() if s.direction == "SELL")
-    total      = len(tf_signals)
+    total = len(tf_signals)
 
-    if buy_count >= sell_count:
-        dominant_dir   = "BUY"
-        confluence_cnt = buy_count
+    # M5 is the entry timeframe — its direction takes priority over a majority vote.
+    # When M5 has a clear signal, other TFs are counted as confirming or opposing.
+    # This prevents M15/H1 mean-reversion lag from overriding a correct M5 momentum signal.
+    m5_sig = tf_signals.get("M5")
+    if m5_sig and m5_sig.direction in ("BUY", "SELL"):
+        dominant_dir   = m5_sig.direction
+        confluence_cnt = sum(1 for s in valid_sigs.values() if s.direction == dominant_dir)
     else:
-        dominant_dir   = "SELL"
-        confluence_cnt = sell_count
+        # No M5 signal — fall back to majority vote across all TFs
+        buy_count  = sum(1 for s in valid_sigs.values() if s.direction == "BUY")
+        sell_count = sum(1 for s in valid_sigs.values() if s.direction == "SELL")
+        if buy_count > sell_count:
+            dominant_dir   = "BUY"
+            confluence_cnt = buy_count
+        elif sell_count > buy_count:
+            dominant_dir   = "SELL"
+            confluence_cnt = sell_count
+        else:
+            dominant_dir   = "HOLD"
+            confluence_cnt = 0
 
     # Confidence bonus and lot multiplier based on confluence
     if confluence_cnt >= total:  # 4/4
@@ -398,8 +410,8 @@ def calc_mtf_confluence(
         if agreeing else 0.0
     )
 
-    # Use the entry TF (H1) prices if available, else highest-confidence TF
-    entry_tf = tf_signals.get("H1") or (agreeing[0] if agreeing else None)
+    # Use M5 prices for entry — M5 is the entry timeframe, not H1
+    entry_tf = tf_signals.get("M5") or (agreeing[0] if agreeing else None)
     if entry_tf:
         entry_price = entry_tf.entry_price
         stop_loss   = entry_tf.stop_loss
