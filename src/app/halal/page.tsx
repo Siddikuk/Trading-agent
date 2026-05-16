@@ -169,14 +169,34 @@ export default function HalalPage() {
     setBudget(next); saveBudget(next);
   };
   const addHolding = (pick: AllocationPick, units: number, costGBP: number) => {
+    // If the user already holds this asset, MERGE with a weighted-average
+    // cost basis rather than replacing — otherwise a second buy silently
+    // wipes the first one and the cash deducted before is unaccounted for.
+    const existing = holdings.find(h => h.yahoo === pick.yahoo);
+    const merged: StoredHolding = existing
+      ? {
+          yahoo: pick.yahoo,
+          units: +(existing.units + units).toFixed(4),
+          avgPriceGBP: +(((existing.units * existing.avgPriceGBP) + (units * pick.priceGBP)) / (existing.units + units)).toFixed(4),
+          addedAt: existing.addedAt,
+        }
+      : { yahoo: pick.yahoo, units, avgPriceGBP: pick.priceGBP, addedAt: new Date().toISOString() };
+
     const next: StoredHolding[] = [
       ...holdings.filter(h => h.yahoo !== pick.yahoo),
-      { yahoo: pick.yahoo, units, avgPriceGBP: pick.priceGBP, addedAt: new Date().toISOString() },
+      merged,
     ];
     setHoldings(next); saveHoldings(next);
-    // give the user immediate feedback by deducting from the working budget too
     updateBudget(Math.max(0, +(budget - costGBP).toFixed(2)));
     setConfirming(null);
+  };
+
+  // Reset everything: clear holdings, set a fresh cash starting balance.
+  // Useful when the tracked state drifted out of sync with the real T212
+  // account (e.g. duplicate purchases from earlier bug versions).
+  const resetAll = (newCash: number) => {
+    setHoldings([]); saveHoldings([]);
+    updateBudget(newCash);
   };
   const removeHolding = (yahoo: string, addBackProceeds?: number) => {
     setHoldings(prev => {
@@ -201,13 +221,33 @@ export default function HalalPage() {
   };
 
   // ── derived ──
-  const totalEquity = useMemo(() => budget + (plan?.portfolioValueGBP ?? 0), [budget, plan]);
-  const pnlAbs = plan?.portfolioPnlGBP ?? 0;
-  const pnlPct = plan?.portfolioPnlPct ?? 0;
-  const startingCapital = useMemo(() => {
-    const cost = holdings.reduce((s, h) => s + h.units * h.avgPriceGBP, 0);
-    return +(budget + cost - pnlAbs).toFixed(2);
-  }, [budget, holdings, pnlAbs]);
+  // Compute portfolio value LOCALLY from the holdings list, using the
+  // freshest known prices from the plan snapshots when available and the
+  // cost basis as a fallback. This keeps Total Equity = cash + invested
+  // consistent across the brief window between "I bought this" updating
+  // holdings/budget and the server returning a re-fetched plan.
+  const portfolio = useMemo(() => {
+    let valueGBP = 0;
+    let costGBP = 0;
+    for (const h of holdings) {
+      const snap = plan?.snapshots.find(s => s.asset.yahoo === h.yahoo);
+      const currentPrice = snap?.priceGBP ?? h.avgPriceGBP;
+      valueGBP += h.units * currentPrice;
+      costGBP += h.units * h.avgPriceGBP;
+    }
+    const pnlGBP = valueGBP - costGBP;
+    const pnlPct = costGBP > 0 ? (pnlGBP / costGBP) * 100 : 0;
+    return {
+      valueGBP: +valueGBP.toFixed(2),
+      costGBP: +costGBP.toFixed(2),
+      pnlGBP: +pnlGBP.toFixed(2),
+      pnlPct: +pnlPct.toFixed(2),
+    };
+  }, [holdings, plan]);
+
+  const totalEquity = +(budget + portfolio.valueGBP).toFixed(2);
+  const pnlAbs = portfolio.pnlGBP;
+  const pnlPct = portfolio.pnlPct;
 
   // ───────── render ─────────
   return (
@@ -258,7 +298,7 @@ export default function HalalPage() {
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-[10px] text-slate-500">Cash {gbp(budget)}</span>
                 <span className="text-[10px] text-slate-700">·</span>
-                <span className="text-[10px] text-slate-500">Invested {gbp(plan?.portfolioValueGBP ?? 0)}</span>
+                <span className="text-[10px] text-slate-500">Invested {gbp(portfolio.valueGBP)}</span>
               </div>
             </div>
             <div className={`text-right ${pnlAbs >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -267,15 +307,36 @@ export default function HalalPage() {
                 <span className="text-sm font-bold">{pct(pnlPct)}</span>
               </div>
               <p className="text-xs mt-0.5">{pnlAbs >= 0 ? '+' : ''}{gbp(Math.abs(pnlAbs))}</p>
-              <p className="text-[10px] text-slate-600 mt-0.5">from {gbp(startingCapital || budget)}</p>
+              {portfolio.costGBP > 0 && (
+                <p className="text-[10px] text-slate-600 mt-0.5">on {gbp(portfolio.costGBP)} invested</p>
+              )}
             </div>
           </div>
 
           {/* budget editor */}
           <div className="mt-4 pt-4 border-t border-slate-800/60">
-            <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5">
-              <Wallet size={11} /> Cash to deploy
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5">
+                <Wallet size={11} /> Cash to deploy
+              </label>
+              <button
+                onClick={() => {
+                  const v = window.prompt(
+                    'Reset — clear tracked holdings and set cash to:',
+                    String(budget || 50),
+                  );
+                  if (v === null) return;
+                  const n = parseFloat(v);
+                  if (!isFinite(n) || n < 0) return;
+                  if (window.confirm(`Clear all tracked holdings and set cash to £${n.toFixed(2)}?`)) {
+                    resetAll(n);
+                  }
+                }}
+                className="text-[10px] text-slate-500 hover:text-rose-300 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-rose-500/10"
+              >
+                <Trash2 size={10} /> Reset
+              </button>
+            </div>
             <div className="flex items-center gap-2 mt-2">
               <span className="text-slate-500 text-lg">£</span>
               <input
