@@ -22,7 +22,7 @@ interface HalalAsset {
 
 interface AssetSnapshot {
   asset: HalalAsset;
-  priceNative: number; priceGBP: number; changePct1d: number;
+  priceNative: number; priceCurrency: string; priceGBP: number; changePct1d: number;
   rsi: number; sma20: number; sma50: number; ema9: number;
   macdHist: number; atrPct: number; pctFrom52wHigh: number; momentum20d: number;
   score: number; action: Action; reasons: string[];
@@ -65,6 +65,22 @@ const BUDGET_KEY  = 'halal-budget-v1';
 const gbp = (n: number) => `£${n.toFixed(2)}`;
 const pct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 
+// Match what Trading 212 shows on the price tile. T212 displays
+// LSE-listed USD share classes with a £ sign but the USD value
+// (no conversion), so we mirror that to avoid confusion. For genuine
+// GBp tickers Yahoo gives pence — we already divided by 100 in priceGBP.
+function formatT212Price(priceNative: number, currency: string): string {
+  if (currency === 'USD') return `£${priceNative.toFixed(2)}`;
+  if (currency === 'GBp' || currency === 'GBX') return `£${(priceNative / 100).toFixed(2)}`;
+  return `£${priceNative.toFixed(2)}`;
+}
+
+// True £ value after FX — what £1 of your ISA actually buys.
+function formatRealGBP(priceGBP: number, priceNative: number, currency: string): string | null {
+  if (currency === 'USD') return `≈ £${priceGBP.toFixed(2)} after FX`;
+  return null;
+}
+
 const ACTION_STYLE: Record<Action, { bg: string; text: string; border: string; label: string }> = {
   STRONG_BUY: { bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/40', label: 'STRONG BUY' },
   BUY:        { bg: 'bg-emerald-500/10', text: 'text-emerald-300', border: 'border-emerald-500/30', label: 'BUY' },
@@ -106,7 +122,7 @@ export default function HalalPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'plan' | 'holdings' | 'universe'>('plan');
   const [showGuide, setShowGuide] = useState(false);
-  const [confirming, setConfirming] = useState<AllocationPick | null>(null);
+  const [confirming, setConfirming] = useState<{ pick: AllocationPick; snap?: AssetSnapshot } | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
   // hydrate from localStorage on mount
@@ -152,15 +168,14 @@ export default function HalalPage() {
   const updateBudget = (next: number) => {
     setBudget(next); saveBudget(next);
   };
-  const addHolding = (pick: AllocationPick, units: number) => {
+  const addHolding = (pick: AllocationPick, units: number, costGBP: number) => {
     const next: StoredHolding[] = [
       ...holdings.filter(h => h.yahoo !== pick.yahoo),
       { yahoo: pick.yahoo, units, avgPriceGBP: pick.priceGBP, addedAt: new Date().toISOString() },
     ];
     setHoldings(next); saveHoldings(next);
     // give the user immediate feedback by deducting from the working budget too
-    const cost = +(units * pick.priceGBP).toFixed(2);
-    updateBudget(Math.max(0, +(budget - cost).toFixed(2)));
+    updateBudget(Math.max(0, +(budget - costGBP).toFixed(2)));
     setConfirming(null);
   };
   const removeHolding = (yahoo: string, addBackProceeds?: number) => {
@@ -310,7 +325,10 @@ export default function HalalPage() {
         {tab === 'plan' && plan && (
           <PlanTab
             plan={plan}
-            onConfirmBuy={(p) => setConfirming(p)}
+            onConfirmBuy={(pick) => {
+              const snap = plan.snapshots.find(s => s.asset.yahoo === pick.yahoo);
+              setConfirming({ pick, snap });
+            }}
             onPartialSell={partialSell}
             onSellAll={(yahoo, proceeds) => removeHolding(yahoo, proceeds)}
           />
@@ -345,10 +363,11 @@ export default function HalalPage() {
       {/* confirm-buy modal */}
       {confirming && (
         <BuyConfirmModal
-          pick={confirming}
+          pick={confirming.pick}
+          snap={confirming.snap}
           maxBudget={budget}
           onCancel={() => setConfirming(null)}
-          onConfirm={(units) => addHolding(confirming, units)}
+          onConfirm={(units, costGBP) => addHolding(confirming.pick, units, costGBP)}
         />
       )}
 
@@ -458,7 +477,16 @@ function BuyCard({ pick, snap, rank, onBuy }: {
             ) : (
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-semibold">SCREENED</span>
             )}
-            <span className="ml-auto text-xs font-mono text-slate-500">{gbp(pick.priceGBP)}</span>
+            <span className="ml-auto text-right">
+              <span className="block text-xs font-mono text-slate-300">
+                {snap ? formatT212Price(snap.priceNative, snap.priceCurrency) : gbp(pick.priceGBP)}
+              </span>
+              {snap && formatRealGBP(snap.priceGBP, snap.priceNative, snap.priceCurrency) && (
+                <span className="block text-[9px] text-slate-600 font-mono">
+                  {formatRealGBP(snap.priceGBP, snap.priceNative, snap.priceCurrency)}
+                </span>
+              )}
+            </span>
           </div>
           <p className="text-[11px] text-slate-400 truncate">{pick.name}</p>
 
@@ -662,7 +690,16 @@ function UniverseTab({ plan }: { plan: GamePlan }) {
               <span className={`text-[10px] px-2 py-0.5 rounded-md border ${style.bg} ${style.text} ${style.border} font-bold`}>
                 {style.label}
               </span>
-              <span className="ml-auto text-xs font-mono text-slate-300">{gbp(s.priceGBP)}</span>
+              <span className="ml-auto text-right">
+                <span className="block text-xs font-mono text-slate-300">
+                  {formatT212Price(s.priceNative, s.priceCurrency)}
+                </span>
+                {formatRealGBP(s.priceGBP, s.priceNative, s.priceCurrency) && (
+                  <span className="block text-[9px] text-slate-600 font-mono">
+                    {formatRealGBP(s.priceGBP, s.priceNative, s.priceCurrency)}
+                  </span>
+                )}
+              </span>
             </div>
             <p className="text-[11px] text-slate-400 truncate">{s.asset.name}</p>
             <div className="mt-1.5 flex items-center gap-3 text-[10px] text-slate-500">
@@ -722,13 +759,15 @@ function ScoreBar({ score }: { score: number }) {
 
 // ─────────────────── BUY confirm modal ───────────────────
 
-function BuyConfirmModal({ pick, maxBudget, onCancel, onConfirm }: {
-  pick: AllocationPick; maxBudget: number;
+function BuyConfirmModal({ pick, snap, maxBudget, onCancel, onConfirm }: {
+  pick: AllocationPick; snap?: AssetSnapshot; maxBudget: number;
   onCancel: () => void;
-  onConfirm: (units: number) => void;
+  onConfirm: (units: number, costGBP: number) => void;
 }) {
   const [amount, setAmount] = useState<number>(Math.min(pick.amountGBP, maxBudget));
   const units = +(amount / pick.priceGBP).toFixed(4);
+  const isUSD = snap?.priceCurrency === 'USD';
+  const t212Display = snap ? formatT212Price(snap.priceNative, snap.priceCurrency) : gbp(pick.priceGBP);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onCancel}>
@@ -745,7 +784,7 @@ function BuyConfirmModal({ pick, maxBudget, onCancel, onConfirm }: {
         <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
           <div className="flex items-baseline justify-between mb-2">
             <span className="text-[10px] text-slate-500 uppercase">Spending</span>
-            <span className="text-[10px] text-slate-500">≈ {units.toFixed(4)} shares @ {gbp(pick.priceGBP)}</span>
+            <span className="text-[10px] text-slate-500">≈ {units.toFixed(4)} shares @ {t212Display}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-slate-500 text-lg">£</span>
@@ -758,6 +797,17 @@ function BuyConfirmModal({ pick, maxBudget, onCancel, onConfirm }: {
             />
           </div>
         </div>
+
+        {isUSD && (
+          <div className="mt-2 rounded-xl bg-amber-500/8 border border-amber-500/20 p-2.5 text-[10px] text-amber-200 leading-relaxed flex gap-1.5">
+            <Info size={12} className="flex-shrink-0 mt-0.5" />
+            <span>
+              <b>{pick.ticker}</b> is USD-priced. T212 may show the price as <b>{t212Display}</b> (it&apos;s
+              the USD number with a £ symbol). Your <b>{gbp(amount)}</b> still buys the same ~{units.toFixed(4)} shares
+              — T212 just adds a ~0.15% FX fee on top.
+            </span>
+          </div>
+        )}
 
         <div className="mt-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20 p-3 text-[11px] text-slate-300 leading-relaxed">
           <p className="font-semibold text-emerald-300 mb-1 flex items-center gap-1"><BookOpen size={11} /> How to do this in T212</p>
@@ -772,7 +822,7 @@ function BuyConfirmModal({ pick, maxBudget, onCancel, onConfirm }: {
         <div className="flex gap-2 mt-4">
           <button onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-700 text-slate-300 font-semibold">Cancel</button>
           <button
-            onClick={() => onConfirm(units)}
+            onClick={() => onConfirm(units, amount)}
             disabled={amount <= 0 || amount > maxBudget}
             className="flex-1 py-3 rounded-xl bg-emerald-500 text-emerald-950 font-bold disabled:opacity-40"
           >

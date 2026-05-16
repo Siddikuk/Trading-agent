@@ -10,13 +10,14 @@
 // trigger — we just label every position BUY / ADD / HOLD / TRIM / SELL.
 
 import { Candle, calcRSI, calcSMA, calcEMA, calcMACD, calcATR } from './trading-engine';
-import { HalalAsset, priceToGBP, Currency } from './halal-stocks';
+import { HalalAsset, priceToGBP } from './halal-stocks';
 
 export type Action = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'TRIM' | 'SELL' | 'AVOID';
 
 export interface AssetSnapshot {
   asset: HalalAsset;
   priceNative: number;     // last close in native currency
+  priceCurrency: string;   // actual quote currency reported by Yahoo
   priceGBP: number;        // converted to GBP
   changePct1d: number;     // % change vs previous close
   rsi: number;
@@ -80,7 +81,12 @@ export interface GamePlan {
 
 // ----------------------- Scoring -----------------------
 
-export function scoreAsset(asset: HalalAsset, candles: Candle[], gbpPerUsd: number): AssetSnapshot {
+export function scoreAsset(
+  asset: HalalAsset,
+  candles: Candle[],
+  gbpPerUsd: number,
+  priceCurrency: string,
+): AssetSnapshot {
   const closes = candles.map(c => c.close);
   const last = closes[closes.length - 1];
   const prev = closes[closes.length - 2] ?? last;
@@ -151,7 +157,8 @@ export function scoreAsset(asset: HalalAsset, candles: Candle[], gbpPerUsd: numb
   return {
     asset,
     priceNative: last,
-    priceGBP: priceToGBP(last, asset.currency, gbpPerUsd),
+    priceCurrency,
+    priceGBP: priceToGBP(last, priceCurrency, gbpPerUsd),
     changePct1d: ((last - prev) / prev) * 100,
     rsi, sma20, sma50, ema9,
     macdHist: macd.histogram,

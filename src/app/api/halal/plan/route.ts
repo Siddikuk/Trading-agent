@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fetchCandles, fetchQuote } from '@/lib/market-data';
+import { fetchCandlesWithMeta, fetchQuote } from '@/lib/market-data';
 import { HALAL_UNIVERSE, findAsset } from '@/lib/halal-stocks';
 import {
   scoreAsset, allocateBudget, evaluateHolding,
@@ -29,12 +29,12 @@ async function buildPlan(budgetGBP: number, holdings: Holding[]): Promise<GamePl
   const results = await Promise.all(
     HALAL_UNIVERSE.map(async (asset) => {
       try {
-        const candles = await fetchCandles(asset.yahoo, TIMEFRAME, CANDLE_LIMIT);
+        const { candles, currency } = await fetchCandlesWithMeta(asset.yahoo, TIMEFRAME, CANDLE_LIMIT);
         if (candles.length < 60) {
           warnings.push(`${asset.ticker}: insufficient history (${candles.length} candles)`);
           return null;
         }
-        return scoreAsset(asset, candles, fxGbpPerUsd);
+        return scoreAsset(asset, candles, fxGbpPerUsd, currency);
       } catch (e) {
         warnings.push(`${asset.ticker}: fetch failed (${String(e).slice(0, 60)})`);
         return null;

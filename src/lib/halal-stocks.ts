@@ -40,7 +40,9 @@ export const HALAL_UNIVERSE: HalalAsset[] = [
     name: 'iShares MSCI USA Islamic UCITS ETF',
     type: 'ETF',
     sector: 'US Broad Market (Sharia)',
-    currency: 'GBp',
+    // LSE-listed but the iShares USD share class — quotes in USD.
+    // (Trading 212 still settles you in GBP via FX on the ISA.)
+    currency: 'USD',
     isaEligible: true,
     status: 'certified',
     note: 'Diversified US Sharia index — the safest "core" holding for an ISA.',
@@ -51,6 +53,7 @@ export const HALAL_UNIVERSE: HalalAsset[] = [
     name: 'iShares MSCI World Islamic UCITS ETF',
     type: 'ETF',
     sector: 'Global Developed (Sharia)',
+    // LSE GBP share class — quotes in pence (GBp).
     currency: 'GBp',
     isaEligible: true,
     status: 'certified',
@@ -62,7 +65,8 @@ export const HALAL_UNIVERSE: HalalAsset[] = [
     name: 'iShares MSCI EM Islamic UCITS ETF',
     type: 'ETF',
     sector: 'Emerging Markets (Sharia)',
-    currency: 'GBp',
+    // LSE-listed USD share class — quotes in USD despite the .L suffix.
+    currency: 'USD',
     isaEligible: true,
     status: 'certified',
     note: 'Emerging-market Sharia exposure — higher growth, higher swings.',
@@ -175,9 +179,17 @@ export function findAsset(yahoo: string): HalalAsset | undefined {
 }
 
 // Convert a raw Yahoo price into GBP for a UK ISA holder.
-// fxRate is GBP per 1 USD (e.g. 0.79 means 1 USD = £0.79).
-export function priceToGBP(price: number, currency: Currency, gbpPerUsd: number): number {
-  if (currency === 'GBP') return price;
-  if (currency === 'GBp') return price / 100;
-  return price * gbpPerUsd;
+// `currency` is Yahoo's reported quote currency — DO NOT trust the
+// HalalAsset.currency hint, since LSE-listed iShares Sharia ETFs quote
+// in USD even though they have `.L` suffixes.
+// gbpPerUsd is GBP per 1 USD (e.g. 0.79 means 1 USD = £0.79).
+export function priceToGBP(price: number, currency: string, gbpPerUsd: number): number {
+  // GBp (pence) check uses the raw string — UPPERCASE would lose the
+  // distinction from GBP. GBX is the alternate code for pence.
+  if (currency === 'GBp' || currency === 'GBX') return price / 100;
+  const c = currency.toUpperCase();
+  if (c === 'GBP') return price;
+  if (c === 'USD') return price * gbpPerUsd;
+  // Unknown currency — assume already in GBP rather than silently mis-scaling.
+  return price;
 }
