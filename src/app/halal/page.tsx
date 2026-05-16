@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   TrendingUp, TrendingDown, RefreshCw, Wallet, ShieldCheck, AlertTriangle,
-  Sparkles, ChevronRight, Plus, Check, Info, ArrowRight, BookOpen, X,
-  Trash2, Star, Pause, Play, Activity, HelpCircle,
+  Sparkles, Plus, Minus, Check, Info, BookOpen, X,
+  Trash2, Pause, Play, Activity, HelpCircle,
 } from 'lucide-react';
 
 // ───── types (mirror the API) ─────
@@ -57,8 +57,16 @@ interface StoredHolding {
   yahoo: string; units: number; avgPriceGBP: number; addedAt: string;
 }
 
-const STORAGE_KEY = 'halal-portfolio-v1';
-const BUDGET_KEY  = 'halal-budget-v1';
+interface Deposit {
+  id: string;
+  amountGBP: number; // positive = deposit, negative = withdrawal
+  at: string;        // ISO timestamp
+  note?: string;
+}
+
+const STORAGE_KEY   = 'halal-portfolio-v1';
+const BUDGET_KEY    = 'halal-budget-v1';
+const DEPOSITS_KEY  = 'halal-deposits-v1';
 const CERTIFIED_ONLY_KEY = 'halal-certified-only-v1';
 
 // ───── helpers ─────
@@ -114,6 +122,29 @@ function loadBudget(): number {
 function saveBudget(b: number) {
   try { window.localStorage.setItem(BUDGET_KEY, String(b)); } catch { /* ignore */ }
 }
+function loadDeposits(): Deposit[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(DEPOSITS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+function saveDeposits(d: Deposit[]) {
+  try { window.localStorage.setItem(DEPOSITS_KEY, JSON.stringify(d)); } catch { /* ignore */ }
+}
+
+function formatRelativeDate(iso: string): string {
+  const then = new Date(iso).getTime();
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  if (days < 1) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
 
 // ───── page ─────
 
@@ -128,11 +159,14 @@ export default function HalalPage() {
   const [confirming, setConfirming] = useState<{ pick: AllocationPick; snap?: AssetSnapshot } | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [certifiedOnly, setCertifiedOnly] = useState(false);
+  const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [depositModal, setDepositModal] = useState(false);
 
   // hydrate from localStorage on mount
   useEffect(() => {
     setBudget(loadBudget());
     setHoldings(loadHoldings());
+    setDeposits(loadDeposits());
     if (typeof window !== 'undefined') {
       setCertifiedOnly(window.localStorage.getItem(CERTIFIED_ONLY_KEY) === '1');
     }
@@ -203,12 +237,49 @@ export default function HalalPage() {
     setConfirming(null);
   };
 
-  // Reset everything: clear holdings, set a fresh cash starting balance.
-  // Useful when the tracked state drifted out of sync with the real T212
-  // account (e.g. duplicate purchases from earlier bug versions).
-  const resetAll = (newCash: number) => {
+  // Reset everything: clear holdings, deposits, set a fresh cash balance.
+  // Optionally records the new cash as a fresh initial deposit so future
+  // P/L calculations have a baseline to measure against.
+  const resetAll = (newCash: number, asInitialDeposit: boolean) => {
     setHoldings([]); saveHoldings([]);
     updateBudget(newCash);
+    if (asInitialDeposit && newCash > 0) {
+      const d: Deposit[] = [{
+        id: `init-${Date.now()}`,
+        amountGBP: +newCash.toFixed(2),
+        at: new Date().toISOString(),
+        note: 'Starting balance',
+      }];
+      setDeposits(d); saveDeposits(d);
+    } else {
+      setDeposits([]); saveDeposits([]);
+    }
+  };
+
+  // Add a weekly contribution (or any deposit / withdrawal).
+  // Positive amount = top up; negative = withdrawal. Increments cash and
+  // appends a row to the deposit log.
+  const addDeposit = (amountGBP: number, note?: string) => {
+    if (!isFinite(amountGBP) || amountGBP === 0) return;
+    const d: Deposit = {
+      id: `d-${Date.now()}`,
+      amountGBP: +amountGBP.toFixed(2),
+      at: new Date().toISOString(),
+      note: note?.trim() || undefined,
+    };
+    const next = [d, ...deposits];
+    setDeposits(next); saveDeposits(next);
+    updateBudget(+(budget + amountGBP).toFixed(2));
+    setDepositModal(false);
+  };
+
+  const removeDeposit = (id: string) => {
+    const target = deposits.find(d => d.id === id);
+    if (!target) return;
+    if (!window.confirm(`Remove this deposit of ${gbp(target.amountGBP)}? Cash will be adjusted.`)) return;
+    const next = deposits.filter(d => d.id !== id);
+    setDeposits(next); saveDeposits(next);
+    updateBudget(Math.max(0, +(budget - target.amountGBP).toFixed(2)));
   };
   const removeHolding = (yahoo: string, addBackProceeds?: number) => {
     setHoldings(prev => {
@@ -258,8 +329,18 @@ export default function HalalPage() {
   }, [holdings, plan]);
 
   const totalEquity = +(budget + portfolio.valueGBP).toFixed(2);
-  const pnlAbs = portfolio.pnlGBP;
-  const pnlPct = portfolio.pnlPct;
+  const netDeposits = +deposits.reduce((s, d) => s + d.amountGBP, 0).toFixed(2);
+  // "True" P/L = lifetime gain on everything you put in (including realised
+  // gains from closed positions, which currently sit in cash). Falls back to
+  // unrealised holdings P/L when no deposits have been logged yet.
+  const truePnlGBP = netDeposits > 0
+    ? +(totalEquity - netDeposits).toFixed(2)
+    : portfolio.pnlGBP;
+  const truePnlPct = netDeposits > 0
+    ? +((truePnlGBP / netDeposits) * 100).toFixed(2)
+    : portfolio.pnlPct;
+  const pnlAbs = truePnlGBP;
+  const pnlPct = truePnlPct;
 
   // ───────── render ─────────
   return (
@@ -319,7 +400,9 @@ export default function HalalPage() {
                 <span className="text-sm font-bold">{pct(pnlPct)}</span>
               </div>
               <p className="text-xs mt-0.5">{pnlAbs >= 0 ? '+' : ''}{gbp(Math.abs(pnlAbs))}</p>
-              {portfolio.costGBP > 0 && (
+              {netDeposits > 0 ? (
+                <p className="text-[10px] text-slate-600 mt-0.5">on {gbp(netDeposits)} deposited</p>
+              ) : portfolio.costGBP > 0 && (
                 <p className="text-[10px] text-slate-600 mt-0.5">on {gbp(portfolio.costGBP)} invested</p>
               )}
             </div>
@@ -331,23 +414,32 @@ export default function HalalPage() {
               <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5">
                 <Wallet size={11} /> Cash to deploy
               </label>
-              <button
-                onClick={() => {
-                  const v = window.prompt(
-                    'Reset — clear tracked holdings and set cash to:',
-                    String(budget || 50),
-                  );
-                  if (v === null) return;
-                  const n = parseFloat(v);
-                  if (!isFinite(n) || n < 0) return;
-                  if (window.confirm(`Clear all tracked holdings and set cash to £${n.toFixed(2)}?`)) {
-                    resetAll(n);
-                  }
-                }}
-                className="text-[10px] text-slate-500 hover:text-rose-300 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-rose-500/10"
-              >
-                <Trash2 size={10} /> Reset
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setDepositModal(true)}
+                  className="text-[10px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30"
+                >
+                  <Plus size={10} /> Add cash
+                </button>
+                <button
+                  onClick={() => {
+                    const v = window.prompt(
+                      'Reset — clear tracked holdings and set cash to:',
+                      String(budget || 50),
+                    );
+                    if (v === null) return;
+                    const n = parseFloat(v);
+                    if (!isFinite(n) || n < 0) return;
+                    const treatAsDeposit = window.confirm(
+                      `Clear all tracked holdings + deposits and set cash to £${n.toFixed(2)}.\n\nOK = log £${n.toFixed(2)} as your starting deposit (recommended)\nCancel = clear deposits too, start completely fresh`,
+                    );
+                    resetAll(n, treatAsDeposit);
+                  }}
+                  className="text-[10px] text-slate-500 hover:text-rose-300 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-rose-500/10"
+                >
+                  <Trash2 size={10} /> Reset
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2 mt-2">
               <span className="text-slate-500 text-lg">£</span>
@@ -367,7 +459,10 @@ export default function HalalPage() {
               ))}
             </div>
             <p className="text-[10px] text-slate-600 mt-1.5">
-              FX rate: 1 USD ≈ £{plan?.fxGbpPerUsd.toFixed(4) ?? '—'} · T212 ISA charges ~0.15% FX
+              {netDeposits > 0 && (
+                <>Deposited {gbp(netDeposits)} lifetime · </>
+              )}
+              FX 1 USD ≈ £{plan?.fxGbpPerUsd.toFixed(4) ?? '—'} · T212 ISA charges ~0.15% FX
             </p>
           </div>
         </section>
@@ -443,6 +538,16 @@ export default function HalalPage() {
           maxBudget={budget}
           onCancel={() => setConfirming(null)}
           onConfirm={(units, costGBP) => addHolding(confirming.pick, units, costGBP)}
+        />
+      )}
+
+      {/* deposit modal */}
+      {depositModal && (
+        <DepositModal
+          deposits={deposits}
+          onClose={() => setDepositModal(false)}
+          onAdd={addDeposit}
+          onRemove={removeDeposit}
         />
       )}
 
@@ -987,6 +1092,124 @@ function BuyConfirmModal({ pick, snap, maxBudget, onCancel, onConfirm }: {
   );
 }
 
+// ─────────────────── Deposit modal ───────────────────
+
+function DepositModal({ deposits, onClose, onAdd, onRemove }: {
+  deposits: Deposit[];
+  onClose: () => void;
+  onAdd: (amount: number, note?: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [amount, setAmount] = useState<string>('');
+  const [note, setNote] = useState<string>('');
+  const numericAmount = parseFloat(amount);
+  const isValid = isFinite(numericAmount) && numericAmount !== 0;
+  const netDeposits = deposits.reduce((s, d) => s + d.amountGBP, 0);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wallet size={16} className="text-emerald-400" />
+            <h2 className="text-sm font-bold text-white">Deposits</h2>
+            {netDeposits > 0 && (
+              <span className="text-[10px] text-slate-500">· {gbp(netDeposits)} total</span>
+            )}
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-400"><X size={18} /></button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* Add form */}
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 space-y-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Log a new deposit
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 text-lg">£</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder="10.00"
+                value={amount}
+                autoFocus
+                onChange={e => setAmount(e.target.value)}
+                className="flex-1 bg-transparent text-2xl font-mono font-bold text-white focus:outline-none"
+              />
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {[5, 10, 20, 50, 100].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setAmount(String(v))}
+                  className="px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-700 text-slate-300 active:bg-slate-800"
+                >£{v}</button>
+              ))}
+            </div>
+            <input
+              type="text"
+              placeholder="Note (optional) — e.g. Week 3"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              className="w-full bg-transparent border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/50"
+            />
+            <button
+              onClick={() => isValid && onAdd(numericAmount, note)}
+              disabled={!isValid}
+              className="w-full py-3 rounded-xl bg-emerald-500 text-emerald-950 font-bold disabled:opacity-40 flex items-center justify-center gap-1.5"
+            >
+              <Plus size={14} />
+              {isValid && numericAmount < 0
+                ? `Log withdrawal ${gbp(Math.abs(numericAmount))}`
+                : `Add ${isValid ? gbp(numericAmount) : '£0.00'} to cash`}
+            </button>
+            <p className="text-[10px] text-slate-600 leading-relaxed">
+              Adds to your <i>Cash to deploy</i> and records the date. Use a negative amount
+              (e.g. -20) to log a withdrawal from the ISA.
+            </p>
+          </div>
+
+          {/* Log */}
+          {deposits.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">
+                History ({deposits.length})
+              </p>
+              <div className="space-y-1.5">
+                {deposits.map(d => (
+                  <div key={d.id} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      d.amountGBP >= 0 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'
+                    }`}>
+                      {d.amountGBP >= 0 ? <Plus size={12} /> : <Minus size={12} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-mono font-semibold text-white">
+                        {d.amountGBP >= 0 ? '+' : ''}{gbp(d.amountGBP)}
+                      </p>
+                      <p className="text-[10px] text-slate-500 truncate">
+                        {formatRelativeDate(d.at)}{d.note ? ` · ${d.note}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => onRemove(d.id)}
+                      className="p-1.5 text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 rounded-md"
+                      aria-label="Remove deposit"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────── Guide modal ───────────────────
 
 function GuideModal({ onClose }: { onClose: () => void }) {
@@ -1007,6 +1230,7 @@ function GuideModal({ onClose }: { onClose: () => void }) {
           <Step n={3} title="Place the order in T212" body="Stocks ISA → search the ticker → Buy → switch the order box from 'Shares' to 'Value' → enter the £ amount we show. Then tap 'I bought this' so we track it." />
           <Step n={4} title="Check daily, act when prompted" body="Open the app every morning. The coach watches your positions and flags SELL (lock in profit or stop a loss), TRIM (sell half on strength), or HOLD." />
           <Step n={5} title="Sell rules built in" body="Stop-loss at −8%. Trim half at +15% or RSI > 75. Full take-profit at +25% or RSI > 82. Trend-break also triggers an exit. You always get the £ proceeds + share count, ready to type into T212." />
+          <Step n={6} title="DCA weekly with + Add cash" body="Deposit £10–20 a week in T212, then tap the + Add cash button. It tops up your budget and logs the deposit, so the P/L line shows true lifetime returns on everything you've put in — not just the last buy." />
 
           <div className="rounded-xl bg-amber-500/8 border border-amber-500/20 p-3 text-[11px]">
             <p className="font-semibold text-amber-300 mb-1 flex items-center gap-1"><AlertTriangle size={11} /> Honest disclaimers</p>
