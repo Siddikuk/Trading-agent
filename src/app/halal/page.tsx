@@ -59,6 +59,7 @@ interface StoredHolding {
 
 const STORAGE_KEY = 'halal-portfolio-v1';
 const BUDGET_KEY  = 'halal-budget-v1';
+const CERTIFIED_ONLY_KEY = 'halal-certified-only-v1';
 
 // ───── helpers ─────
 
@@ -87,7 +88,9 @@ const ACTION_STYLE: Record<Action, { bg: string; text: string; border: string; l
   HOLD:       { bg: 'bg-slate-500/10',   text: 'text-slate-300',   border: 'border-slate-500/30',   label: 'HOLD' },
   TRIM:       { bg: 'bg-amber-500/15',   text: 'text-amber-300',   border: 'border-amber-500/40',   label: 'TRIM HALF' },
   SELL:       { bg: 'bg-rose-500/15',    text: 'text-rose-300',    border: 'border-rose-500/40',    label: 'SELL' },
-  AVOID:      { bg: 'bg-slate-700/40',   text: 'text-slate-400',   border: 'border-slate-700',      label: 'AVOID' },
+  // "WAIT" — chart says don't buy right now (overbought, downtrend, etc).
+  // NOT a halal verdict — every asset in the universe is Sharia-screened.
+  AVOID:      { bg: 'bg-slate-700/40',   text: 'text-slate-400',   border: 'border-slate-700',      label: 'WAIT' },
 };
 
 function loadHoldings(): StoredHolding[] {
@@ -124,11 +127,15 @@ export default function HalalPage() {
   const [showGuide, setShowGuide] = useState(false);
   const [confirming, setConfirming] = useState<{ pick: AllocationPick; snap?: AssetSnapshot } | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [certifiedOnly, setCertifiedOnly] = useState(false);
 
   // hydrate from localStorage on mount
   useEffect(() => {
     setBudget(loadBudget());
     setHoldings(loadHoldings());
+    if (typeof window !== 'undefined') {
+      setCertifiedOnly(window.localStorage.getItem(CERTIFIED_ONLY_KEY) === '1');
+    }
     // open the guide on first visit
     if (typeof window !== 'undefined' && !window.localStorage.getItem('halal-seen-guide')) {
       setShowGuide(true);
@@ -136,13 +143,18 @@ export default function HalalPage() {
     }
   }, []);
 
+  const toggleCertifiedOnly = (v: boolean) => {
+    setCertifiedOnly(v);
+    try { window.localStorage.setItem(CERTIFIED_ONLY_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+  };
+
   const fetchPlan = useCallback(async () => {
     setLoading(true); setError(null);
     try {
       const res = await fetch('/api/halal/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ budget, holdings }),
+        body: JSON.stringify({ budget, holdings, certifiedOnly }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -153,7 +165,7 @@ export default function HalalPage() {
     } finally {
       setLoading(false);
     }
-  }, [budget, holdings]);
+  }, [budget, holdings, certifiedOnly]);
 
   useEffect(() => { fetchPlan(); }, [fetchPlan]);
 
@@ -386,6 +398,8 @@ export default function HalalPage() {
         {tab === 'plan' && plan && (
           <PlanTab
             plan={plan}
+            certifiedOnly={certifiedOnly}
+            onToggleCertified={toggleCertifiedOnly}
             onConfirmBuy={(pick) => {
               const snap = plan.snapshots.find(s => s.asset.yahoo === pick.yahoo);
               setConfirming({ pick, snap });
@@ -405,7 +419,7 @@ export default function HalalPage() {
 
         {/* ── UNIVERSE TAB ── */}
         {tab === 'universe' && plan && (
-          <UniverseTab plan={plan} />
+          <UniverseTab plan={plan} certifiedOnly={certifiedOnly} onToggleCertified={toggleCertifiedOnly} />
         )}
 
         {loading && !plan && (
@@ -440,14 +454,21 @@ export default function HalalPage() {
 
 // ─────────────────── PLAN TAB ───────────────────
 
-function PlanTab({ plan, onConfirmBuy, onPartialSell, onSellAll }: {
+function PlanTab({ plan, certifiedOnly, onToggleCertified, onConfirmBuy, onPartialSell, onSellAll }: {
   plan: GamePlan;
+  certifiedOnly: boolean;
+  onToggleCertified: (v: boolean) => void;
   onConfirmBuy: (p: AllocationPick) => void;
   onPartialSell: (yahoo: string, units: number, proceeds: number) => void;
   onSellAll: (yahoo: string, proceeds: number) => void;
 }) {
   const sellList = plan.holdingsVerdict.filter(v => v.action === 'SELL' || v.action === 'TRIM');
   const holdList = plan.holdingsVerdict.filter(v => v.action === 'HOLD' || v.action === 'BUY');
+
+  // Server already applies the certified-only filter to the buyPlan and
+  // re-runs the allocator on the filtered universe — so the £ amounts
+  // properly fill the cash budget.
+  const visibleBuys = plan.buyPlan;
 
   return (
     <div className="space-y-4">
@@ -474,20 +495,43 @@ function PlanTab({ plan, onConfirmBuy, onPartialSell, onSellAll }: {
         </Section>
       )}
 
+      {/* Certified-only toggle — most users land on the Plan tab, so put it here too */}
+      <label className="rounded-2xl bg-slate-900 border border-slate-800 p-3 flex items-center justify-between gap-3 cursor-pointer">
+        <div className="flex-1">
+          <p className="text-[11px] font-semibold text-slate-200 flex items-center gap-1.5">
+            <ShieldCheck size={12} className="text-emerald-400" />
+            Certified-only mode
+          </p>
+          <p className="text-[10px] text-slate-500 mt-0.5">
+            Only buy stocks that currently sit in an Islamic index. Hides screened-but-not-indexed names.
+          </p>
+        </div>
+        <input
+          type="checkbox"
+          checked={certifiedOnly}
+          onChange={e => onToggleCertified(e.target.checked)}
+          className="w-5 h-5 accent-emerald-500"
+        />
+      </label>
+
       {/* BUY section */}
-      <Section icon={<Sparkles size={14} />} title={plan.buyPlan.length ? "Today's Buys" : "No buys today"} tone="emerald">
-        {plan.buyPlan.length === 0 ? (
+      <Section icon={<Sparkles size={14} />} title={visibleBuys.length ? "Today's Buys" : "No buys today"} tone="emerald">
+        {visibleBuys.length === 0 ? (
           <div className="p-4 text-center">
-            <p className="text-xs text-slate-500">Nothing in the universe rated BUY right now.</p>
+            <p className="text-xs text-slate-500">
+              {certifiedOnly
+                ? 'No certified-index stocks rate BUY today.'
+                : 'Nothing in the universe rated BUY right now.'}
+            </p>
             <p className="text-[10px] text-slate-600 mt-1">Patience is a position. Check back tomorrow.</p>
           </div>
         ) : (
           <>
             <div className="px-3 pt-2 pb-1 text-[10px] text-slate-500 flex items-center justify-between">
-              <span>Spreading {gbp(plan.buyPlan.reduce((s, p) => s + p.amountGBP, 0))} across {plan.buyPlan.length}</span>
-              <span>Cash after: {gbp(Math.max(0, plan.cashAvailableGBP - plan.buyPlan.reduce((s, p) => s + p.amountGBP, 0)))}</span>
+              <span>Spreading {gbp(visibleBuys.reduce((s, p) => s + p.amountGBP, 0))} across {visibleBuys.length}</span>
+              <span>Cash after: {gbp(Math.max(0, plan.cashAvailableGBP - visibleBuys.reduce((s, p) => s + p.amountGBP, 0)))}</span>
             </div>
-            {plan.buyPlan.map((pick, i) => (
+            {visibleBuys.map((pick, i) => (
               <BuyCard
                 key={pick.yahoo}
                 pick={pick}
@@ -736,17 +780,65 @@ function HoldingsTab({ plan, onRemove }: { plan: GamePlan; onRemove: (yahoo: str
 
 // ─────────────────── UNIVERSE TAB ───────────────────
 
-function UniverseTab({ plan }: { plan: GamePlan }) {
+function UniverseTab({ plan, certifiedOnly, onToggleCertified }: {
+  plan: GamePlan; certifiedOnly: boolean; onToggleCertified: (v: boolean) => void;
+}) {
+  const visible = certifiedOnly
+    ? plan.snapshots.filter(s => s.asset.status === 'certified')
+    : plan.snapshots;
+
   return (
-    <div className="space-y-2">
-      {plan.snapshots.map(s => {
+    <div className="space-y-3">
+      {/* explainer + filter */}
+      <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3 space-y-3">
+        <div className="text-[11px] text-slate-400 leading-relaxed">
+          <p>
+            <b className="text-emerald-300">All assets here are halal-screened.</b> The colored badges
+            mean two different things:
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            <li className="flex gap-2 items-start">
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold mt-0.5">CERTIFIED</span>
+              <span>sits in a major Islamic index today (Wahed / MSCI Islamic)</span>
+            </li>
+            <li className="flex gap-2 items-start">
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-semibold mt-0.5">SCREENED</span>
+              <span>passes quantitative Sharia screens — re-verify each quarter</span>
+            </li>
+            <li className="flex gap-2 items-start">
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/40 text-slate-400 font-semibold mt-0.5">WAIT</span>
+              <span>chart signal — overbought or downtrend, don&apos;t buy <i>today</i>. <b>Not</b> a halal verdict.</span>
+            </li>
+          </ul>
+        </div>
+        <label className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800 cursor-pointer">
+          <span className="text-[11px] text-slate-300">
+            Show <b>certified-only</b> (hide screened-but-not-yet-indexed names)
+          </span>
+          <input
+            type="checkbox"
+            checked={certifiedOnly}
+            onChange={e => onToggleCertified(e.target.checked)}
+            className="w-5 h-5 accent-emerald-500"
+          />
+        </label>
+      </div>
+
+      {visible.map(s => {
         const style = ACTION_STYLE[s.action];
         return (
           <div key={s.asset.yahoo} className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
-            <div className="flex items-center gap-2 mb-1.5">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <span className="font-mono text-sm font-bold text-white">{s.asset.ticker}</span>
               {s.asset.type === 'ETF' && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 font-semibold">ETF</span>
+              )}
+              {s.asset.status === 'certified' ? (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold flex items-center gap-0.5">
+                  <ShieldCheck size={9} /> CERTIFIED
+                </span>
+              ) : (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-semibold">SCREENED</span>
               )}
               <span className={`text-[10px] px-2 py-0.5 rounded-md border ${style.bg} ${style.text} ${style.border} font-bold`}>
                 {style.label}

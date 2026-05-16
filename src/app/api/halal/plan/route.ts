@@ -20,12 +20,14 @@ async function getGbpPerUsd(): Promise<number> {
   return 0.79; // sensible fallback
 }
 
-async function buildPlan(budgetGBP: number, holdings: Holding[]): Promise<GamePlan> {
+async function buildPlan(budgetGBP: number, holdings: Holding[], certifiedOnly: boolean): Promise<GamePlan> {
   const warnings: string[] = [];
   const fxGbpPerUsd = await getGbpPerUsd();
 
   // Fetch candles for every asset in parallel — Yahoo handles this fine
-  // and our market-data layer caches for 60s.
+  // and our market-data layer caches for 60s. We still score the whole
+  // universe so the Universe tab can show every asset's signal; the
+  // certifiedOnly filter only affects which assets get £ allocations.
   const results = await Promise.all(
     HALAL_UNIVERSE.map(async (asset) => {
       try {
@@ -83,7 +85,12 @@ async function buildPlan(budgetGBP: number, holdings: Holding[]): Promise<GamePl
       .filter(v => v.action === 'HOLD' || v.action === 'BUY' || v.action === 'TRIM')
       .map(v => v.yahoo)
   );
-  const buyCandidates = snapshots.filter(s => !heldYahoos.has(s.asset.yahoo));
+  let buyCandidates = snapshots.filter(s => !heldYahoos.has(s.asset.yahoo));
+  // certifiedOnly: skip stocks that only pass quantitative Sharia screens
+  // but aren't currently held in a major Islamic index.
+  if (certifiedOnly) {
+    buyCandidates = buyCandidates.filter(s => s.asset.status === 'certified');
+  }
 
   const buyPlan = allocateBudget(buyCandidates, cashAvailableGBP, 4);
 
@@ -105,8 +112,9 @@ async function buildPlan(budgetGBP: number, holdings: Holding[]): Promise<GamePl
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const budget = parseFloat(searchParams.get('budget') || '50');
+  const certifiedOnly = searchParams.get('certifiedOnly') === '1';
   try {
-    const plan = await buildPlan(isFinite(budget) ? budget : 50, []);
+    const plan = await buildPlan(isFinite(budget) ? budget : 50, [], certifiedOnly);
     return NextResponse.json(plan);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
@@ -118,6 +126,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const budget = typeof body.budget === 'number' && isFinite(body.budget) && body.budget >= 0
       ? body.budget : 50;
+    const certifiedOnly = body.certifiedOnly === true;
     const rawHoldings = Array.isArray(body.holdings) ? body.holdings : [];
 
     const holdings: Holding[] = rawHoldings
@@ -132,7 +141,7 @@ export async function POST(req: Request) {
       })
       .filter((h: Holding | null): h is Holding => h !== null);
 
-    const plan = await buildPlan(budget, holdings);
+    const plan = await buildPlan(budget, holdings, certifiedOnly);
     return NextResponse.json(plan);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
