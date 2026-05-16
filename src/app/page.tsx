@@ -558,6 +558,22 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-2">
+            <a
+              href="/halal"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+              title="Halal ISA Coach"
+            >
+              <Shield size={12} />
+              Halal ISA
+            </a>
+            <a
+              href="/halal"
+              className="sm:hidden p-2 rounded-lg text-emerald-300 hover:bg-emerald-500/15 border border-emerald-500/30"
+              title="Halal ISA Coach"
+              aria-label="Halal ISA Coach"
+            >
+              <Shield size={14} />
+            </a>
             <button
               onClick={() => fetchAll(false)}
               disabled={refreshing}
