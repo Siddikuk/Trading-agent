@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   TrendingUp, TrendingDown, RefreshCw, Wallet, ShieldCheck, AlertTriangle,
   Sparkles, Plus, Minus, Check, Info, BookOpen, X,
-  Trash2, Pause, Play, Activity, HelpCircle,
+  Trash2, Pause, Play, Activity, HelpCircle, Link as LinkIcon, Settings,
+  Eye, EyeOff,
 } from 'lucide-react';
 
 // ───── types (mirror the API) ─────
@@ -68,6 +69,10 @@ const STORAGE_KEY   = 'halal-portfolio-v1';
 const BUDGET_KEY    = 'halal-budget-v1';
 const DEPOSITS_KEY  = 'halal-deposits-v1';
 const CERTIFIED_ONLY_KEY = 'halal-certified-only-v1';
+// Trading 212 API key is stored only in localStorage on this device.
+// It never gets persisted on the server.
+const T212_KEY      = 'halal-t212-key-v1';
+const T212_MODE_KEY = 'halal-t212-mode-v1'; // "live" | "demo"
 
 // ───── helpers ─────
 
@@ -161,6 +166,12 @@ export default function HalalPage() {
   const [certifiedOnly, setCertifiedOnly] = useState(false);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [depositModal, setDepositModal] = useState(false);
+  // T212 connection — key + mode kept in localStorage on this device only.
+  const [t212Key, setT212Key] = useState<string>('');
+  const [t212Mode, setT212Mode] = useState<'live' | 'demo'>('live');
+  const [t212Modal, setT212Modal] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
 
   // hydrate from localStorage on mount
   useEffect(() => {
@@ -169,6 +180,9 @@ export default function HalalPage() {
     setDeposits(loadDeposits());
     if (typeof window !== 'undefined') {
       setCertifiedOnly(window.localStorage.getItem(CERTIFIED_ONLY_KEY) === '1');
+      setT212Key(window.localStorage.getItem(T212_KEY) || '');
+      const m = window.localStorage.getItem(T212_MODE_KEY);
+      if (m === 'demo' || m === 'live') setT212Mode(m);
     }
     // open the guide on first visit
     if (typeof window !== 'undefined' && !window.localStorage.getItem('halal-seen-guide')) {
@@ -213,6 +227,53 @@ export default function HalalPage() {
 
   const updateBudget = (next: number) => {
     setBudget(next); saveBudget(next);
+  };
+
+  const saveT212Settings = (key: string, mode: 'live' | 'demo') => {
+    setT212Key(key); setT212Mode(mode);
+    try {
+      if (key) window.localStorage.setItem(T212_KEY, key);
+      else window.localStorage.removeItem(T212_KEY);
+      window.localStorage.setItem(T212_MODE_KEY, mode);
+    } catch { /* ignore */ }
+  };
+
+  // Pull cash + positions from T212. Replaces local budget & holdings with
+  // the authoritative values from the broker. Manual "I bought this" still
+  // works for users without a key; the two paths coexist.
+  const handleT212Sync = async (): Promise<void> => {
+    if (!t212Key) { setT212Modal(true); return; }
+    setSyncing(true); setSyncResult(null); setError(null);
+    try {
+      const res = await fetch('/api/t212/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: t212Key, isDemo: t212Mode === 'demo' }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+
+      // Cash overwrites budget (T212 is the source of truth).
+      // Holdings are replaced with whatever T212 says we own — the merge
+      // logic we use for manual buys doesn't apply here.
+      updateBudget(data.cashGBP);
+      const nextHoldings: StoredHolding[] = data.positions.map((p: { yahoo: string; units: number; avgPriceGBP: number }) => ({
+        yahoo: p.yahoo,
+        units: p.units,
+        avgPriceGBP: p.avgPriceGBP,
+        addedAt: new Date().toISOString(),
+      }));
+      setHoldings(nextHoldings); saveHoldings(nextHoldings);
+
+      const skipped = (data.warnings ?? []).length;
+      setSyncResult(
+        `Synced — £${data.cashGBP.toFixed(2)} cash, ${nextHoldings.length} position${nextHoldings.length === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped — not in universe)` : ''}.`
+      );
+    } catch (e) {
+      setError(`T212 sync failed: ${String(e instanceof Error ? e.message : e)}`);
+    } finally {
+      setSyncing(false);
+    }
   };
   const addHolding = (pick: AllocationPick, units: number, costGBP: number) => {
     // If the user already holds this asset, MERGE with a weighted-average
@@ -371,6 +432,14 @@ export default function HalalPage() {
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
           <button
+            onClick={() => setT212Modal(true)}
+            className={`p-2 rounded-lg border ${t212Key ? 'bg-sky-500/15 border-sky-500/40 text-sky-300' : 'border-slate-800 text-slate-500'}`}
+            aria-label="T212 connection settings"
+            title={t212Key ? 'T212 connected — tap to manage' : 'Connect Trading 212'}
+          >
+            <LinkIcon size={14} />
+          </button>
+          <button
             onClick={() => setShowGuide(true)}
             className="p-2 rounded-lg border border-slate-800 text-slate-300"
             aria-label="Open guide"
@@ -410,11 +479,20 @@ export default function HalalPage() {
 
           {/* budget editor */}
           <div className="mt-4 pt-4 border-t border-slate-800/60">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
               <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5">
                 <Wallet size={11} /> Cash to deploy
               </label>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  onClick={handleT212Sync}
+                  disabled={syncing}
+                  className="text-[10px] text-sky-300 hover:text-sky-200 flex items-center gap-1 px-2 py-1 rounded-md bg-sky-500/10 border border-sky-500/30 disabled:opacity-50"
+                  title={t212Key ? 'Pull live cash & positions from Trading 212' : 'Connect T212 first'}
+                >
+                  <RefreshCw size={10} className={syncing ? 'animate-spin' : ''} />
+                  Sync T212
+                </button>
                 <button
                   onClick={() => setDepositModal(true)}
                   className="text-[10px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30"
@@ -441,6 +519,15 @@ export default function HalalPage() {
                 </button>
               </div>
             </div>
+            {syncResult && (
+              <div className="mb-2 px-2 py-1.5 rounded-md bg-sky-500/10 border border-sky-500/30 text-[10px] text-sky-200 flex items-start gap-1.5">
+                <Check size={11} className="flex-shrink-0 mt-0.5" />
+                <span>{syncResult}</span>
+                <button onClick={() => setSyncResult(null)} className="ml-auto text-sky-300/60 hover:text-sky-200">
+                  <X size={11} />
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 mt-2">
               <span className="text-slate-500 text-lg">£</span>
               <input
@@ -548,6 +635,19 @@ export default function HalalPage() {
           onClose={() => setDepositModal(false)}
           onAdd={addDeposit}
           onRemove={removeDeposit}
+        />
+      )}
+
+      {/* T212 connection modal */}
+      {t212Modal && (
+        <T212Modal
+          apiKey={t212Key}
+          mode={t212Mode}
+          syncing={syncing}
+          onClose={() => setT212Modal(false)}
+          onSave={(k, m) => { saveT212Settings(k, m); setT212Modal(false); }}
+          onClear={() => { saveT212Settings('', t212Mode); }}
+          onSyncNow={() => { setT212Modal(false); handleT212Sync(); }}
         />
       )}
 
@@ -1204,6 +1304,135 @@ function DepositModal({ deposits, onClose, onAdd, onRemove }: {
               </div>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────── T212 connection modal ───────────────────
+
+function T212Modal({ apiKey, mode, syncing, onClose, onSave, onClear, onSyncNow }: {
+  apiKey: string;
+  mode: 'live' | 'demo';
+  syncing: boolean;
+  onClose: () => void;
+  onSave: (key: string, mode: 'live' | 'demo') => void;
+  onClear: () => void;
+  onSyncNow: () => void;
+}) {
+  const [key, setKey] = useState(apiKey);
+  const [curMode, setCurMode] = useState<'live' | 'demo'>(mode);
+  const [reveal, setReveal] = useState(false);
+  const trimmed = key.trim();
+  const isConnected = apiKey.length > 0;
+  const dirty = trimmed !== apiKey || curMode !== mode;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <LinkIcon size={16} className="text-sky-400" />
+            <h2 className="text-sm font-bold text-white">Trading 212 connection</h2>
+            {isConnected && <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 font-semibold">CONNECTED</span>}
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-400"><X size={18} /></button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* How to get a key */}
+          <div className="rounded-xl bg-sky-500/8 border border-sky-500/20 p-3 text-[11px] text-slate-300 leading-relaxed">
+            <p className="font-semibold text-sky-300 mb-1.5 flex items-center gap-1"><BookOpen size={11} /> Get your API key (1 min)</p>
+            <ol className="space-y-1 text-slate-400 list-decimal list-inside">
+              <li>Open Trading 212 on web or mobile</li>
+              <li>Tap your avatar → <b className="text-white">Settings → API Generated Keys</b></li>
+              <li>Tap <b className="text-white">Generate API key</b></li>
+              <li>Tick <b className="text-emerald-300">read-only</b> scopes:
+                <span className="text-slate-300"> Account, Personal portfolio, Historical orders</span></li>
+              <li>Copy the key and paste it below</li>
+            </ol>
+          </div>
+
+          {/* Mode toggle */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Account type</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setCurMode('live')}
+                className={`py-2 rounded-lg text-xs font-bold border ${curMode === 'live' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'border-slate-800 text-slate-500'}`}
+              >LIVE (real money)</button>
+              <button
+                onClick={() => setCurMode('demo')}
+                className={`py-2 rounded-lg text-xs font-bold border ${curMode === 'demo' ? 'bg-amber-500/15 border-amber-500/40 text-amber-300' : 'border-slate-800 text-slate-500'}`}
+              >DEMO (practice)</button>
+            </div>
+          </div>
+
+          {/* Key input */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">API key</p>
+            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
+              <input
+                type={reveal ? 'text' : 'password'}
+                placeholder="Paste from T212…"
+                value={key}
+                onChange={e => setKey(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className="flex-1 bg-transparent text-sm font-mono text-white placeholder-slate-600 focus:outline-none"
+              />
+              <button
+                onClick={() => setReveal(r => !r)}
+                className="text-slate-500 hover:text-slate-300 p-0.5"
+                aria-label={reveal ? 'Hide key' : 'Show key'}
+              >
+                {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Trust note */}
+          <div className="rounded-xl bg-slate-800/40 border border-slate-700/60 p-3 text-[11px] text-slate-400 leading-relaxed">
+            <p className="font-semibold text-slate-200 mb-1 flex items-center gap-1">
+              <ShieldCheck size={11} className="text-emerald-400" /> How your key is handled
+            </p>
+            <ul className="space-y-0.5 list-disc list-inside">
+              <li>Stored only in <b className="text-slate-300">this device&apos;s browser</b> (localStorage)</li>
+              <li>Sent to the coach&apos;s server only when you tap Sync, used once, then dropped</li>
+              <li>Never logged, never persisted server-side, never echoed back</li>
+              <li>Read-only — the coach can&apos;t place or cancel orders</li>
+              <li>You can revoke the key any time in T212&apos;s API Settings</li>
+            </ul>
+          </div>
+
+          {/* Actions */}
+          <div className="space-y-2">
+            <button
+              onClick={() => onSave(trimmed, curMode)}
+              disabled={!trimmed || !dirty}
+              className="w-full py-3 rounded-xl bg-sky-500 text-sky-950 font-bold disabled:opacity-40 flex items-center justify-center gap-1.5"
+            >
+              <Check size={14} /> Save key
+            </button>
+            <button
+              onClick={onSyncNow}
+              disabled={!trimmed || syncing}
+              className="w-full py-3 rounded-xl bg-emerald-500 text-emerald-950 font-bold disabled:opacity-40 flex items-center justify-center gap-1.5"
+            >
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> Save & sync now
+            </button>
+            {isConnected && (
+              <button
+                onClick={() => {
+                  if (window.confirm('Disconnect Trading 212? The key will be removed from this device.')) onClear();
+                }}
+                className="w-full py-2.5 rounded-xl border border-rose-500/30 text-rose-300 text-xs font-semibold hover:bg-rose-500/10"
+              >
+                Disconnect
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

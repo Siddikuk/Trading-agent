@@ -28,6 +28,49 @@ export interface HalalAsset {
   note: string;          // short reason for inclusion / what to know
 }
 
+// Normalise a Trading 212 instrument ticker (e.g. "AAPL_US_EQ", "ISWDl_EQ")
+// down to its bare alphanumeric core so it can be matched against our
+// universe regardless of T212's listing-suffix convention. The lowercase
+// venue letter must be matched BEFORE uppercasing — otherwise we'd strip
+// the trailing L from genuine tickers like AAPL.
+//
+// Examples:
+//   AAPL_US_EQ      → AAPL       (US equity)
+//   GOOGL_US_EQ     → GOOGL      (preserves trailing L since not LSE)
+//   MSFT_US_EQ      → MSFT
+//   NVDA_US_EQ      → NVDA
+//   TSM_US_EQ       → TSM
+//   ISWDl_EQ        → ISWD       (lowercase l = LSE venue)
+//   ISDUl_EQ        → ISDU
+//   ISDEl_EQ        → ISDE
+export function normaliseT212Ticker(t212: string): string {
+  const s = t212.trim();
+  // US-listed: strip the whole "_US_EQ" tail, keep the rest as-is.
+  if (/_US_EQ$/i.test(s)) {
+    return s.replace(/_US_EQ$/i, '').toUpperCase();
+  }
+  // LSE-listed: lowercase venue letter followed by _EQ.
+  if (/[a-z]_EQ$/.test(s)) {
+    return s.replace(/[a-z]_EQ$/, '').toUpperCase();
+  }
+  // Generic _EQ suffix with no venue letter.
+  if (/_EQ$/i.test(s)) {
+    return s.replace(/_EQ$/i, '').toUpperCase();
+  }
+  return s.toUpperCase();
+}
+
+// Match a T212 position ticker to one of our universe assets. Returns
+// undefined if no halal-screened asset matches (the position is real but
+// outside our coverage — we surface a warning rather than guess).
+export function findAssetByT212Ticker(t212: string): HalalAsset | undefined {
+  const norm = normaliseT212Ticker(t212);
+  return HALAL_UNIVERSE.find(a => {
+    const yahooBare = a.yahoo.toUpperCase().replace(/\.L$/, '');
+    return yahooBare === norm || a.ticker.toUpperCase() === norm;
+  });
+}
+
 // Pricing currency note: London-listed equities/ETFs quote in GBp
 // (pence) on Yahoo with the .L suffix; divide by 100 to get GBP.
 // US-listed stocks quote in USD and need GBP/USD conversion.
