@@ -117,10 +117,16 @@ def check_halal_zero_tolerance(ticker_symbol: str) -> dict | None:
         if financial_debt > 0:
             return None  # any interest-bearing financial debt = rejected
 
-        # --- Zero-tolerance interest income check ---
+        # --- Interest income check (max 1% of revenue — requires purification) ---
         interest_income = _get_interest_income(t)
-        if interest_income > 0:
-            return None  # any interest income = rejected
+        total_revenue = info.get('totalRevenue') or 0
+        if interest_income > 0 and total_revenue > 0:
+            interest_ratio = interest_income / total_revenue
+            from config import MAX_INTEREST_INCOME_RATIO
+            if interest_ratio > MAX_INTEREST_INCOME_RATIO:
+                return None  # too much interest income — rejected
+        elif interest_income > 0 and total_revenue == 0:
+            return None  # has interest income but no real business revenue
 
         # --- Passed all checks — collect data for scoring ---
         return {
@@ -142,6 +148,8 @@ def check_halal_zero_tolerance(ticker_symbol: str) -> dict | None:
             'totalRevenue': info.get('totalRevenue'),
             'totalDebt': financial_debt,
             'interestIncome': interest_income,
+            'interestIncomeRatio': round(interest_income / total_revenue, 4) if total_revenue > 0 else 0,
+            'purificationRequired': interest_income > 0,
             'trailingPE': info.get('trailingPE'),
             'forwardPE': info.get('forwardPE'),
             'website': info.get('website', ''),

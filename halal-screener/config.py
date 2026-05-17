@@ -71,6 +71,11 @@ SUPPORTED_EXCHANGES = {
     'SWX',
 }
 
+# Interest income tolerance (Option 1 — strict but practical)
+# Companies earning less than this % of revenue as bank interest are allowed
+# but you must donate that same % of your profits to charity (purification)
+MAX_INTEREST_INCOME_RATIO = 0.01  # 1% of total revenue
+
 # Growth screening thresholds
 MIN_REVENUE_GROWTH = 0.10       # 10% YoY minimum revenue growth
 MIN_MARKET_CAP = 30_000_000     # $30M — not a micro/penny stock

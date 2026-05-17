@@ -100,7 +100,8 @@ def print_report(stocks: list[dict], top_n: int):
   Price      : {s.get('currentPrice')} {s.get('currency')}
   Rev Growth : {format_pct(s.get('revenueGrowth'))}   |   Earn Growth: {format_pct(s.get('earningsGrowth'))}
   Gross Margin: {format_pct(s.get('grossMargins'))}  |   ROE: {format_pct(s.get('returnOnEquity'))}
-  Total Debt : ${s.get('totalDebt', 0):,.0f}  ✅  |   Interest Income: ${s.get('interestIncome', 0):,.0f}  ✅
+  Financial Debt: $0  ✅
+  Interest Income: ${s.get('interestIncome', 0):,.0f}  {'⚠️  PURIFY ' + str(round(s.get('interestIncomeRatio',0)*100,2)) + '% of profits → donate to charity' if s.get('purificationRequired') else '✅ Zero'}
   Score      : {s.get('score')}/100
   Website    : {s.get('website', 'N/A')}
   About      : {s.get('summary', 'N/A')}
