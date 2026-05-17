@@ -1,19 +1,21 @@
 import { PrismaClient } from '@prisma/client'
-import { neon } from '@neondatabase/serverless'
-import { PrismaNeon } from '@prisma/adapter-neon'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
 function createPrismaClient() {
-  // Use Neon's serverless driver for Vercel edge/serverless compatibility
+  // Neon serverless (Vercel / production)
   if (process.env.POSTGRES_PRISMA_URL) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { neon } = require('@neondatabase/serverless')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaNeon } = require('@prisma/adapter-neon')
     const sql = neon(process.env.POSTGRES_PRISMA_URL)
     const adapter = new PrismaNeon(sql)
     return new PrismaClient({ adapter })
   }
-  // Fallback for local development
+  // SQLite fallback — local development
   return new PrismaClient()
 }
 

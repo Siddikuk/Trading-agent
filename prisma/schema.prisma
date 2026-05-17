@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("POSTGRES_PRISMA_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model Trade {
@@ -20,7 +20,7 @@ model Trade {
   status      String   @default("OPEN")
   signalId    String?
   strategy    String?
-  mt5Ticket   BigInt?
+  mt5Ticket   Int?
   openTime    DateTime @default(now())
   closeTime   DateTime?
   notes       String?
