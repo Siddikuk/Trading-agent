@@ -51,29 +51,29 @@ def _get_financial_debt(ticker_obj: yf.Ticker) -> float:
         if bs is None or bs.empty:
             return 0.0
 
-        # 'Long Term Debt' in yfinance = financial debt EXCLUDING capital leases
-        if 'Long Term Debt' in bs.index:
-            val = bs.loc['Long Term Debt'].iloc[0]
-            long_term = float(val) if pd.notna(val) else 0.0
-        else:
-            long_term = 0.0
+        def _val(key) -> float:
+            if key in bs.index:
+                v = bs.loc[key].iloc[0]
+                return float(v) if pd.notna(v) else 0.0
+            return 0.0
 
-        # Current portion of long-term financial debt (excluding current lease obligations)
-        current_financial = 0.0
-        if 'Current Debt And Capital Lease Obligation' in bs.index and 'Current Capital Lease Obligation' in bs.index:
-            total_current = bs.loc['Current Debt And Capital Lease Obligation'].iloc[0]
-            current_lease = bs.loc['Current Capital Lease Obligation'].iloc[0]
-            t = float(total_current) if pd.notna(total_current) else 0.0
-            l = float(current_lease) if pd.notna(current_lease) else 0.0
-            current_financial = max(0.0, t - l)
-        elif 'Current Debt And Capital Lease Obligation' in bs.index:
-            val = bs.loc['Current Debt And Capital Lease Obligation'].iloc[0]
-            current_financial = float(val) if pd.notna(val) else 0.0
+        # Best case: yfinance reports 'Long Term Debt' separately (excludes leases)
+        if 'Long Term Debt' in bs.index:
+            long_term = _val('Long Term Debt')
+        else:
+            # Fallback: subtract capital lease obligations from the combined line
+            lt_combined = _val('Long Term Debt And Capital Lease Obligation')
+            lt_lease    = _val('Long Term Capital Lease Obligation')
+            long_term   = max(0.0, lt_combined - lt_lease)
+
+        # Current portion: financial debt only (subtract current lease portion)
+        current_combined = _val('Current Debt And Capital Lease Obligation')
+        current_lease    = _val('Current Capital Lease Obligation')
+        current_financial = max(0.0, current_combined - current_lease)
 
         return long_term + current_financial
 
     except Exception:
-        # Fall back to info-level totalDebt minus capital leases
         return 0.0
 
 

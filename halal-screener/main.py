@@ -110,7 +110,8 @@ def print_report(stocks: list[dict], top_n: int):
 
 def main():
     parser = argparse.ArgumentParser(description='Halal Growth Stock Screener')
-    parser.add_argument('--fast', action='store_true', help='US-only fast mode (fewer stocks)')
+    parser.add_argument('--fast', action='store_true', help='US-only fast mode (top 800 stocks)')
+    parser.add_argument('--expand', action='store_true', help='Scan broader US small/mid/micro cap universe')
     parser.add_argument('--top', type=int, default=20, help='Number of top results to show')
     parser.add_argument('--workers', type=int, default=8, help='Parallel workers for data fetching')
     parser.add_argument('--no-cache', action='store_true', help='Ignore cached results')
@@ -144,6 +145,25 @@ def main():
         df = df.sort_values('_r').head(800)
         candidates = df.index.tolist()
         print(f'  Fast mode: {len(candidates)} US candidates (NYSE/NASDAQ only)')
+    elif args.expand:
+        import financedatabase as fd
+        from config import FORBIDDEN_SECTORS, FORBIDDEN_INDUSTRIES, FORBIDDEN_NAME_KEYWORDS
+        equities = fd.Equities()
+        df = equities.select(country='United States')
+        df = df[df['exchange'].isin({'NMS', 'NYQ', 'NGM', 'NCM'})]
+        df = df[~df['sector'].isin(FORBIDDEN_SECTORS)]
+        df = df[~df['industry'].isin(FORBIDDEN_INDUSTRIES)]
+        # Skip Nano Cap — too small for reliable yfinance data
+        df = df[df['market_cap'].isin({'Large Cap', 'Mega Cap', 'Mid Cap', 'Small Cap', 'Micro Cap'})]
+        cap_order = {'Mega Cap': 0, 'Large Cap': 1, 'Mid Cap': 2, 'Small Cap': 3, 'Micro Cap': 4}
+        df['_r'] = df['market_cap'].map(cap_order).fillna(5)
+        df = df.sort_values('_r')
+        # Load cache to skip already-scanned tickers
+        existing_cache = load_cache() if not args.no_cache else {}
+        all_tickers = df.index.tolist()
+        candidates = [t for t in all_tickers if t not in existing_cache]
+        print(f'  Expand mode: {len(candidates)} new US Small/Mid/Micro Cap to scan')
+        print(f'  (Skipping {len(all_tickers) - len(candidates)} already cached)')
     else:
         candidates = get_candidate_tickers(max_per_country=args.max_per_country)
 
@@ -159,24 +179,32 @@ def main():
     results = []
     to_fetch = [t for t in candidates if t not in cache]
     cached_hits = [cache[t] for t in candidates if t in cache and cache[t] is not None]
+    # Always include ALL previously found passing stocks (not just from current candidates)
+    all_prior_passes = [v for k, v in cache.items() if v is not None and k not in {c for c in candidates}]
 
-    print(f'  Cached: {len(cached_hits)} | To fetch: {len(to_fetch)}')
+    print(f'  Cached: {len(cached_hits)} | To fetch: {len(to_fetch)} | Prior passes carried over: {len(all_prior_passes)}')
 
     if to_fetch:
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            futures = {executor.submit(check_halal_zero_tolerance, t): t for t in to_fetch}
-            with tqdm(total=len(to_fetch), desc='  Screening', unit='stock') as pbar:
-                for future in as_completed(futures):
-                    ticker = futures[future]
-                    result = future.result()
-                    cache[ticker] = result  # cache even None results
-                    if result is not None:
-                        results.append(result)
-                    pbar.update(1)
-
-        save_cache(cache)
+        BATCH_SIZE = 40
+        batches = [to_fetch[i:i+BATCH_SIZE] for i in range(0, len(to_fetch), BATCH_SIZE)]
+        with tqdm(total=len(to_fetch), desc='  Screening', unit='stock') as pbar:
+            for batch_idx, batch in enumerate(batches):
+                with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                    futures = {executor.submit(check_halal_zero_tolerance, t): t for t in batch}
+                    for future in as_completed(futures):
+                        ticker = futures[future]
+                        result = future.result()
+                        cache[ticker] = result
+                        if result is not None:
+                            results.append(result)
+                        pbar.update(1)
+                # Save cache every batch and pause to respect rate limits
+                save_cache(cache)
+                if batch_idx < len(batches) - 1:
+                    time.sleep(1.5)
 
     results.extend(cached_hits)
+    results.extend(all_prior_passes)
     print(f'\n  ✅ {len(results)} stocks passed Halal zero-tolerance filter')
 
     if not results:

@@ -77,9 +77,9 @@ SUPPORTED_EXCHANGES = {
 MAX_INTEREST_INCOME_RATIO = 0.01  # 1% of total revenue
 
 # Growth screening thresholds
-MIN_REVENUE_GROWTH = 0.10       # 10% YoY minimum revenue growth
+MIN_REVENUE_GROWTH = 0.05       # 5% YoY minimum — let scoring handle quality
 MIN_MARKET_CAP = 30_000_000     # $30M — not a micro/penny stock
-MAX_MARKET_CAP = 20_000_000_000 # $20B — still room to grow significantly
+MAX_MARKET_CAP = 100_000_000_000 # $100B — even large companies can still grow
 MIN_GROSS_MARGIN = 0.0          # must be at least break-even gross profit
 
 # Scoring weights (must sum to 100)
