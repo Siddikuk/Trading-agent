@@ -69,10 +69,14 @@ const STORAGE_KEY   = 'halal-portfolio-v1';
 const BUDGET_KEY    = 'halal-budget-v1';
 const DEPOSITS_KEY  = 'halal-deposits-v1';
 const CERTIFIED_ONLY_KEY = 'halal-certified-only-v1';
-// Trading 212 API key is stored only in localStorage on this device.
-// It never gets persisted on the server.
-const T212_KEY      = 'halal-t212-key-v1';
+// Trading 212 credentials are stored only in localStorage on this device.
+// They never get persisted on the server.
+const T212_KEY_ID   = 'halal-t212-keyid-v2';
+const T212_SECRET   = 'halal-t212-secret-v2';
 const T212_MODE_KEY = 'halal-t212-mode-v1'; // "live" | "demo"
+// Old single-token storage from before T212 switched to key+secret. We
+// clear it on hydrate so leftover bytes don't sit in the user's browser.
+const T212_LEGACY_KEY = 'halal-t212-key-v1';
 
 // ───── helpers ─────
 
@@ -166,8 +170,10 @@ export default function HalalPage() {
   const [certifiedOnly, setCertifiedOnly] = useState(false);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [depositModal, setDepositModal] = useState(false);
-  // T212 connection — key + mode kept in localStorage on this device only.
-  const [t212Key, setT212Key] = useState<string>('');
+  // T212 connection — key ID + secret + mode kept in localStorage on this
+  // device only. Both pieces are required for HTTP Basic auth.
+  const [t212KeyId, setT212KeyId] = useState<string>('');
+  const [t212Secret, setT212Secret] = useState<string>('');
   const [t212Mode, setT212Mode] = useState<'live' | 'demo'>('live');
   const [t212Modal, setT212Modal] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -180,9 +186,12 @@ export default function HalalPage() {
     setDeposits(loadDeposits());
     if (typeof window !== 'undefined') {
       setCertifiedOnly(window.localStorage.getItem(CERTIFIED_ONLY_KEY) === '1');
-      setT212Key(window.localStorage.getItem(T212_KEY) || '');
+      setT212KeyId(window.localStorage.getItem(T212_KEY_ID) || '');
+      setT212Secret(window.localStorage.getItem(T212_SECRET) || '');
       const m = window.localStorage.getItem(T212_MODE_KEY);
       if (m === 'demo' || m === 'live') setT212Mode(m);
+      // Clear leftover from the old single-token scheme — useless now.
+      window.localStorage.removeItem(T212_LEGACY_KEY);
     }
     // open the guide on first visit
     if (typeof window !== 'undefined' && !window.localStorage.getItem('halal-seen-guide')) {
@@ -229,26 +238,32 @@ export default function HalalPage() {
     setBudget(next); saveBudget(next);
   };
 
-  const saveT212Settings = (key: string, mode: 'live' | 'demo') => {
-    setT212Key(key); setT212Mode(mode);
+  const saveT212Settings = (keyId: string, secret: string, mode: 'live' | 'demo') => {
+    setT212KeyId(keyId); setT212Secret(secret); setT212Mode(mode);
     try {
-      if (key) window.localStorage.setItem(T212_KEY, key);
-      else window.localStorage.removeItem(T212_KEY);
+      if (keyId) window.localStorage.setItem(T212_KEY_ID, keyId);
+      else window.localStorage.removeItem(T212_KEY_ID);
+      if (secret) window.localStorage.setItem(T212_SECRET, secret);
+      else window.localStorage.removeItem(T212_SECRET);
       window.localStorage.setItem(T212_MODE_KEY, mode);
     } catch { /* ignore */ }
   };
 
   // Pull cash + positions from T212. Replaces local budget & holdings with
   // the authoritative values from the broker. Manual "I bought this" still
-  // works for users without a key; the two paths coexist.
+  // works for users without credentials; the two paths coexist.
   const handleT212Sync = async (): Promise<void> => {
-    if (!t212Key) { setT212Modal(true); return; }
+    if (!t212KeyId || !t212Secret) { setT212Modal(true); return; }
     setSyncing(true); setSyncResult(null); setError(null);
     try {
       const res = await fetch('/api/t212/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: t212Key, isDemo: t212Mode === 'demo' }),
+        body: JSON.stringify({
+          apiKeyId: t212KeyId,
+          apiSecret: t212Secret,
+          isDemo: t212Mode === 'demo',
+        }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
@@ -433,9 +448,9 @@ export default function HalalPage() {
           </button>
           <button
             onClick={() => setT212Modal(true)}
-            className={`p-2 rounded-lg border ${t212Key ? 'bg-sky-500/15 border-sky-500/40 text-sky-300' : 'border-slate-800 text-slate-500'}`}
+            className={`p-2 rounded-lg border ${t212KeyId && t212Secret ? 'bg-sky-500/15 border-sky-500/40 text-sky-300' : 'border-slate-800 text-slate-500'}`}
             aria-label="T212 connection settings"
-            title={t212Key ? 'T212 connected — tap to manage' : 'Connect Trading 212'}
+            title={t212KeyId && t212Secret ? 'T212 connected — tap to manage' : 'Connect Trading 212'}
           >
             <LinkIcon size={14} />
           </button>
@@ -488,7 +503,7 @@ export default function HalalPage() {
                   onClick={handleT212Sync}
                   disabled={syncing}
                   className="text-[10px] text-sky-300 hover:text-sky-200 flex items-center gap-1 px-2 py-1 rounded-md bg-sky-500/10 border border-sky-500/30 disabled:opacity-50"
-                  title={t212Key ? 'Pull live cash & positions from Trading 212' : 'Connect T212 first'}
+                  title={t212KeyId && t212Secret ? 'Pull live cash & positions from Trading 212' : 'Connect T212 first'}
                 >
                   <RefreshCw size={10} className={syncing ? 'animate-spin' : ''} />
                   Sync T212
@@ -641,12 +656,13 @@ export default function HalalPage() {
       {/* T212 connection modal */}
       {t212Modal && (
         <T212Modal
-          apiKey={t212Key}
+          apiKeyId={t212KeyId}
+          apiSecret={t212Secret}
           mode={t212Mode}
           syncing={syncing}
           onClose={() => setT212Modal(false)}
-          onSave={(k, m) => { saveT212Settings(k, m); setT212Modal(false); }}
-          onClear={() => { saveT212Settings('', t212Mode); }}
+          onSave={(id, secret, m) => { saveT212Settings(id, secret, m); setT212Modal(false); }}
+          onClear={() => { saveT212Settings('', '', t212Mode); }}
           onSyncNow={() => { setT212Modal(false); handleT212Sync(); }}
         />
       )}
@@ -1312,21 +1328,26 @@ function DepositModal({ deposits, onClose, onAdd, onRemove }: {
 
 // ─────────────────── T212 connection modal ───────────────────
 
-function T212Modal({ apiKey, mode, syncing, onClose, onSave, onClear, onSyncNow }: {
-  apiKey: string;
+function T212Modal({ apiKeyId, apiSecret, mode, syncing, onClose, onSave, onClear, onSyncNow }: {
+  apiKeyId: string;
+  apiSecret: string;
   mode: 'live' | 'demo';
   syncing: boolean;
   onClose: () => void;
-  onSave: (key: string, mode: 'live' | 'demo') => void;
+  onSave: (keyId: string, secret: string, mode: 'live' | 'demo') => void;
   onClear: () => void;
   onSyncNow: () => void;
 }) {
-  const [key, setKey] = useState(apiKey);
+  const [keyId, setKeyId] = useState(apiKeyId);
+  const [secret, setSecret] = useState(apiSecret);
   const [curMode, setCurMode] = useState<'live' | 'demo'>(mode);
-  const [reveal, setReveal] = useState(false);
-  const trimmed = key.trim();
-  const isConnected = apiKey.length > 0;
-  const dirty = trimmed !== apiKey || curMode !== mode;
+  const [revealKey, setRevealKey] = useState(false);
+  const [revealSecret, setRevealSecret] = useState(false);
+  const trimKeyId = keyId.trim();
+  const trimSecret = secret.trim();
+  const isConnected = apiKeyId.length > 0 && apiSecret.length > 0;
+  const dirty = trimKeyId !== apiKeyId || trimSecret !== apiSecret || curMode !== mode;
+  const canSubmit = trimKeyId.length >= 4 && trimSecret.length >= 8;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose}>
@@ -1343,14 +1364,16 @@ function T212Modal({ apiKey, mode, syncing, onClose, onSave, onClear, onSyncNow 
         <div className="p-4 space-y-4">
           {/* How to get a key */}
           <div className="rounded-xl bg-sky-500/8 border border-sky-500/20 p-3 text-[11px] text-slate-300 leading-relaxed">
-            <p className="font-semibold text-sky-300 mb-1.5 flex items-center gap-1"><BookOpen size={11} /> Get your API key (1 min)</p>
+            <p className="font-semibold text-sky-300 mb-1.5 flex items-center gap-1"><BookOpen size={11} /> Get your credentials (1 min)</p>
             <ol className="space-y-1 text-slate-400 list-decimal list-inside">
-              <li>Open Trading 212 on web or mobile</li>
-              <li>Tap your avatar → <b className="text-white">Settings → API Generated Keys</b></li>
+              <li>T212 → tap your avatar → <b className="text-white">Settings → API Generated Keys</b></li>
               <li>Tap <b className="text-white">Generate API key</b></li>
-              <li>Tick <b className="text-emerald-300">read-only</b> scopes:
-                <span className="text-slate-300"> Account, Personal portfolio, Historical orders</span></li>
-              <li>Copy the key and paste it below</li>
+              <li>Tick the <b className="text-emerald-300">read-only</b> scopes:
+                <span className="text-slate-300"> Account, Portfolio, Metadata</span>.
+                Leave <b className="text-rose-300">Orders – Execute</b> OFF.</li>
+              <li>T212 shows two values: <b className="text-white">API KEY ID</b> + <b className="text-white">SECRET KEY</b>.
+                The SECRET KEY is shown <i>once</i> — copy it now or you&apos;ll have to regenerate.</li>
+              <li>Paste both below.</li>
             </ol>
           </div>
 
@@ -1369,55 +1392,81 @@ function T212Modal({ apiKey, mode, syncing, onClose, onSave, onClear, onSyncNow 
             </div>
           </div>
 
-          {/* Key input */}
+          {/* Key ID input */}
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">API key</p>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">API key ID</p>
             <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
               <input
-                type={reveal ? 'text' : 'password'}
-                placeholder="Paste from T212…"
-                value={key}
-                onChange={e => setKey(e.target.value)}
+                type={revealKey ? 'text' : 'password'}
+                placeholder="From T212 → API KEY ID"
+                value={keyId}
+                onChange={e => setKeyId(e.target.value)}
                 autoComplete="off"
                 spellCheck={false}
                 className="flex-1 bg-transparent text-sm font-mono text-white placeholder-slate-600 focus:outline-none"
               />
               <button
-                onClick={() => setReveal(r => !r)}
+                onClick={() => setRevealKey(r => !r)}
                 className="text-slate-500 hover:text-slate-300 p-0.5"
-                aria-label={reveal ? 'Hide key' : 'Show key'}
+                aria-label={revealKey ? 'Hide key ID' : 'Show key ID'}
               >
-                {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
+                {revealKey ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
+          </div>
+
+          {/* Secret input */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Secret key</p>
+            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
+              <input
+                type={revealSecret ? 'text' : 'password'}
+                placeholder="From T212 → SECRET KEY"
+                value={secret}
+                onChange={e => setSecret(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className="flex-1 bg-transparent text-sm font-mono text-white placeholder-slate-600 focus:outline-none"
+              />
+              <button
+                onClick={() => setRevealSecret(r => !r)}
+                className="text-slate-500 hover:text-slate-300 p-0.5"
+                aria-label={revealSecret ? 'Hide secret' : 'Show secret'}
+              >
+                {revealSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-600 mt-1.5">
+              Lost the secret? Open T212 API Settings, revoke this key, generate a new one.
+            </p>
           </div>
 
           {/* Trust note */}
           <div className="rounded-xl bg-slate-800/40 border border-slate-700/60 p-3 text-[11px] text-slate-400 leading-relaxed">
             <p className="font-semibold text-slate-200 mb-1 flex items-center gap-1">
-              <ShieldCheck size={11} className="text-emerald-400" /> How your key is handled
+              <ShieldCheck size={11} className="text-emerald-400" /> How your credentials are handled
             </p>
             <ul className="space-y-0.5 list-disc list-inside">
               <li>Stored only in <b className="text-slate-300">this device&apos;s browser</b> (localStorage)</li>
               <li>Sent to the coach&apos;s server only when you tap Sync, used once, then dropped</li>
               <li>Never logged, never persisted server-side, never echoed back</li>
               <li>Read-only — the coach can&apos;t place or cancel orders</li>
-              <li>You can revoke the key any time in T212&apos;s API Settings</li>
+              <li>Revoke any time in T212&apos;s API Settings</li>
             </ul>
           </div>
 
           {/* Actions */}
           <div className="space-y-2">
             <button
-              onClick={() => onSave(trimmed, curMode)}
-              disabled={!trimmed || !dirty}
+              onClick={() => onSave(trimKeyId, trimSecret, curMode)}
+              disabled={!canSubmit || !dirty}
               className="w-full py-3 rounded-xl bg-sky-500 text-sky-950 font-bold disabled:opacity-40 flex items-center justify-center gap-1.5"
             >
-              <Check size={14} /> Save key
+              <Check size={14} /> Save
             </button>
             <button
               onClick={onSyncNow}
-              disabled={!trimmed || syncing}
+              disabled={!canSubmit || syncing}
               className="w-full py-3 rounded-xl bg-emerald-500 text-emerald-950 font-bold disabled:opacity-40 flex items-center justify-center gap-1.5"
             >
               <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> Save & sync now
@@ -1425,7 +1474,7 @@ function T212Modal({ apiKey, mode, syncing, onClose, onSave, onClear, onSyncNow 
             {isConnected && (
               <button
                 onClick={() => {
-                  if (window.confirm('Disconnect Trading 212? The key will be removed from this device.')) onClear();
+                  if (window.confirm('Disconnect Trading 212? Both the key ID and secret will be removed from this device.')) onClear();
                 }}
                 className="w-full py-2.5 rounded-xl border border-rose-500/30 text-rose-300 text-xs font-semibold hover:bg-rose-500/10"
               >
