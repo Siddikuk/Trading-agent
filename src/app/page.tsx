@@ -9,6 +9,7 @@ import {
   ArrowUpRight, ArrowDownRight, Newspaper, ExternalLink,
   ChevronDown, ChevronUp, Filter,
 } from 'lucide-react';
+import HalalTab from '@/components/trading/HalalTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -402,7 +403,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
   const [toggling, setToggling] = useState(false);
-  const [midTab, setMidTab] = useState<'signals' | 'news'>('signals');
+  const [midTab, setMidTab] = useState<'signals' | 'news' | 'halal'>('signals');
   const [filterSymbol, setFilterSymbol] = useState<string | null>(null);
   const _lastRefresh = useRef(Date.now());
 
@@ -737,6 +738,20 @@ export default function Dashboard() {
                 )
               }
             </button>
+            <button
+              onClick={() => setMidTab('halal')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                midTab === 'halal'
+                  ? 'bg-emerald-900/60 text-emerald-300 shadow'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Shield size={12} />
+              Halal Picks
+              <span className={`text-[10px] px-1.5 rounded-full ${midTab === 'halal' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-slate-700 text-slate-500'}`}>
+                4
+              </span>
+            </button>
           </div>
 
           {/* Signals tab */}
@@ -864,6 +879,9 @@ export default function Dashboard() {
               )}
             </div>
           )}
+
+          {/* Halal tab */}
+          {midTab === 'halal' && <HalalTab />}
         </div>
 
         {/* ── Right: Trades + Audit ── */}
