@@ -178,6 +178,73 @@ export async function fetchCandles(symbol: string, timeframe: string, limit?: nu
   }
 }
 
+// Like fetchCandles, but also returns the real quote currency from Yahoo's
+// chart meta. Needed for assets where Yahoo's reported currency doesn't
+// match what the ticker suffix would suggest (e.g. iShares LSE-listed
+// Sharia ETFs that quote in USD despite a `.L` suffix).
+export async function fetchCandlesWithMeta(
+  symbol: string, timeframe: string, limit?: number,
+): Promise<{ candles: Candle[]; currency: string }> {
+  const candleLimit = limit ?? TIMEFRAME_CANDLE_LIMITS[timeframe] ?? 200;
+  const rangeMap: Record<string, Record<string, string>> = {
+    '5m': { range: '5d', interval: '5m' },
+    '15m': { range: '10d', interval: '15m' },
+    '1h': { range: '30d', interval: '1h' },
+    '4h': { range: '60d', interval: '1h' },
+    '1d': { range: '1y', interval: '1d' },
+  };
+  const cfg = rangeMap[timeframe] ?? rangeMap['1h'];
+
+  // Reuses the same cache key as fetchCandles so we don't double-fetch
+  // when both helpers are called for the same symbol+timeframe.
+  const data = await fetchWithCache(`candles_${symbol}_${timeframe}`, 60000, async () => {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${cfg.range}&interval=${cfg.interval}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  });
+
+  type ChartData = {
+    chart?: { result?: Array<{
+      meta?: { currency?: string };
+      timestamp?: number[];
+      indicators?: { quote?: Array<{ open?: (number|null)[]; high?: (number|null)[]; low?: (number|null)[]; close?: (number|null)[]; volume?: (number|null)[] }> };
+      open?: (number|null)[]; high?: (number|null)[]; low?: (number|null)[]; close?: (number|null)[]; volume?: (number|null)[];
+    }> };
+  };
+  const chartResult = (data as ChartData)?.chart?.result?.[0];
+  if (!chartResult) return { candles: [], currency: 'USD' };
+
+  const currency = chartResult.meta?.currency || 'USD';
+  const timestamps: number[] = chartResult.timestamp || [];
+  let opens = chartResult.open || [];
+  let highs = chartResult.high || [];
+  let lows = chartResult.low || [];
+  let closes = chartResult.close || [];
+  let volumes = chartResult.volume || [];
+  if (opens.length === 0 && chartResult.indicators?.quote?.[0]) {
+    const q = chartResult.indicators.quote[0];
+    opens = q.open || []; highs = q.high || []; lows = q.low || [];
+    closes = q.close || []; volumes = q.volume || [];
+  }
+  if (timestamps.length === 0 || opens.length === 0) return { candles: [], currency };
+
+  const candles: Candle[] = [];
+  const startIdx = Math.max(0, timestamps.length - candleLimit);
+  const maxIdx = Math.min(timestamps.length, opens.length, closes.length);
+  for (let i = startIdx; i < maxIdx; i++) {
+    if (opens[i] == null || closes[i] == null) continue;
+    candles.push({
+      time: timestamps[i] * 1000,
+      open: opens[i]!, high: highs[i] ?? opens[i]!, low: lows[i] ?? opens[i]!,
+      close: closes[i]!, volume: volumes[i] ?? 0,
+    });
+  }
+  return { candles, currency };
+}
+
 function aggregateTo4h(
   timestamps: number[], opens: (number|null)[], highs: (number|null)[],
   lows: (number|null)[], closes: (number|null)[], volumes: (number|null)[]
