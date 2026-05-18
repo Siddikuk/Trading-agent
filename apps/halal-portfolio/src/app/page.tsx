@@ -158,19 +158,26 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {[
-          { label: 'Portfolio value', value: `£${fmt(summary.totalValue)}`, sub: account?.cash ? `Cash: £${fmt(account.cash.free)}` : `${summary.positions} stocks` },
-          { label: 'Invested', value: `£${fmt(summary.totalInvested)}`, sub: `${summary.positions} positions` },
+      {/* Stats row — totals from account summary (GBP accurate) */}
+      {(() => {
+        const inv     = account?.cash?.invested ?? 0
+        const pnl     = account?.cash?.ppl ?? summary.totalPnl
+        const val     = inv + pnl
+        const pnlPct  = inv > 0 ? (pnl / inv) * 100 : 0
+        const stats = [
+          { label: 'Portfolio value', value: `£${fmt(val)}`, sub: account?.cash ? `Cash: £${fmt(account.cash.free)}` : `${summary.positions} stocks` },
+          { label: 'Invested', value: `£${fmt(inv)}`, sub: `${summary.positions} positions` },
           {
             label: 'Total return',
-            value: `${summary.totalPnl >= 0 ? '+' : ''}£${fmt(Math.abs(summary.totalPnl))}`,
-            sub: `${summary.pnlPct >= 0 ? '+' : ''}${fmt(summary.pnlPct)}%`,
-            colour: summary.totalPnl >= 0 ? 'text-green-400' : 'text-red-400',
+            value: `${pnl >= 0 ? '+' : ''}£${fmt(Math.abs(pnl))}`,
+            sub: `${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct)}%`,
+            colour: pnl >= 0 ? 'text-green-400' : 'text-red-400',
           },
           { label: 'In 10 years*', value: `£${Math.round(proj10).toLocaleString()}`, sub: '£50/wk · 15%/yr estimate' },
-        ].map(({ label, value, sub, colour }) => (
+        ]
+        return (
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        {stats.map(({ label, value, sub, colour }) => (
           <div key={label} className="bg-zinc-900/60 border border-zinc-800/50 rounded-xl p-3">
             <p className="text-xs text-zinc-500">{label}</p>
             <p className={`text-base font-bold mt-0.5 ${colour ?? 'text-zinc-100'}`}>{value}</p>
@@ -178,6 +185,8 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+        )
+      })()}
 
       {/* THIS WEEK'S BUY */}
       <div className="rounded-2xl overflow-hidden border-2 border-green-700/60 bg-gradient-to-br from-green-950/80 to-zinc-900/90">
@@ -341,13 +350,15 @@ export default function Dashboard() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-zinc-200">{p.ticker}</p>
-                  <p className="text-xs text-zinc-600">{fmt(p.quantity, 4)} × £{fmt(p.averagePrice)}</p>
+                  <p className="text-xs text-zinc-600">{fmt(p.quantity, 4)} shares</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-sm text-zinc-200">£{fmt(p.currentPrice * p.quantity)}</p>
-                  <p className={`text-xs flex items-center gap-0.5 justify-end ${p.ppl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {p.ppl >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                  <p className={`text-sm font-semibold ${p.ppl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                     {p.ppl >= 0 ? '+' : ''}£{fmt(Math.abs(p.ppl))}
+                  </p>
+                  <p className={`text-xs flex items-center gap-0.5 justify-end ${p.ppl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {p.ppl >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                    {p.ppl >= 0 ? '+' : ''}{fmt(p.averagePrice > 0 ? ((p.currentPrice - p.averagePrice) / p.averagePrice) * 100 : 0)}%
                   </p>
                 </div>
               </div>

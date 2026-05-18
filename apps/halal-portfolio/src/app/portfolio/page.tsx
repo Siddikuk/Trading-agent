@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { loadSettings, getPositions, Position } from '@/lib/t212'
+import { loadSettings, getPositions, getAccountSummary, Position, AccountSummary } from '@/lib/t212'
 import { STOCKS } from '@/lib/stocks'
 import { TrendingUp, TrendingDown, RefreshCw, ShieldCheck, ShieldAlert } from 'lucide-react'
 
@@ -15,6 +15,7 @@ const CACHE_KEY = 'hp_dash_v1'
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
   const [positions, setPositions] = useState<Position[]>([])
+  const [account, setAccount] = useState<AccountSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -32,6 +33,7 @@ export default function Portfolio() {
           const c = JSON.parse(raw)
           if (Date.now() - c.ts < 60_000) {
             setPositions(c.positions)
+            setAccount(c.account ?? null)
             setLoading(false)
             return
           }
@@ -41,8 +43,12 @@ export default function Portfolio() {
 
     try {
       const pos = await getPositions(s)
+      await new Promise(r => setTimeout(r, 1500))
+      const acc = await getAccountSummary(s)
       setPositions(pos)
+      setAccount(acc)
       setError('')
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ positions: pos, account: acc, ts: Date.now() })) } catch { /* ignore */ }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg.includes('429') ? 'T212 rate limit — wait 30 s then refresh' : msg)
@@ -68,9 +74,11 @@ export default function Portfolio() {
     </div>
   )
 
-  const totalValue    = positions.reduce((s, p) => s + p.currentPrice * p.quantity, 0)
-  const totalPnl      = positions.reduce((s, p) => s + p.ppl, 0)
-  const totalInvested = positions.reduce((s, p) => s + p.averagePrice * p.quantity, 0)
+  // Use account summary for GBP-accurate totals
+  const totalInvested = account?.cash?.invested ?? 0
+  const totalPnl      = account?.cash?.ppl ?? positions.reduce((s, p) => s + p.ppl, 0)
+  const totalValue    = totalInvested + totalPnl
+  const pnlPct        = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0
 
   return (
     <div className="space-y-4">
@@ -99,6 +107,9 @@ export default function Portfolio() {
           <p className={`text-lg font-bold mt-0.5 ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
             {totalPnl >= 0 ? '+' : ''}£{fmt(Math.abs(totalPnl))}
           </p>
+          <p className={`text-xs ${pnlPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {pnlPct >= 0 ? '+' : ''}{fmt(pnlPct)}%
+          </p>
         </div>
       </div>
 
@@ -109,12 +120,12 @@ export default function Portfolio() {
         </div>
       ) : (
         <div className="space-y-2">
-          {[...positions].sort((a, b) => b.currentPrice * b.quantity - a.currentPrice * a.quantity).map(p => {
-            const value    = p.currentPrice * p.quantity
-            const invested = p.averagePrice * p.quantity
-            const pct      = invested > 0 ? (p.ppl / invested) * 100 : 0
-            const isHalal  = halalTickers.has(p.ticker)
-            const info     = STOCKS.find(s => s.ticker === p.ticker)
+          {[...positions].sort((a, b) => b.ppl - a.ppl).map(p => {
+            // ppl is in GBP (account currency) — safe to display
+            // P&L % derived from native-currency prices — ratio is still meaningful
+            const pct     = p.averagePrice > 0 ? ((p.currentPrice - p.averagePrice) / p.averagePrice) * 100 : 0
+            const isHalal = halalTickers.has(p.ticker)
+            const info    = STOCKS.find(s => s.ticker === p.ticker)
 
             return (
               <div key={p.ticker} className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4">
@@ -137,16 +148,15 @@ export default function Portfolio() {
                       )}
                     </div>
                     <p className="text-xs text-zinc-600 mt-0.5">
-                      {fmt(p.quantity, 4)} shares · avg £{fmt(p.averagePrice)} · now £{fmt(p.currentPrice)}
+                      {fmt(p.quantity, 4)} shares
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="font-semibold text-zinc-100">£{fmt(value)}</p>
-                    <p className={`text-xs flex items-center gap-0.5 justify-end mt-0.5 ${p.ppl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {p.ppl >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                    <p className={`font-semibold ${p.ppl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {p.ppl >= 0 ? '+' : ''}£{fmt(Math.abs(p.ppl))}
                     </p>
-                    <p className={`text-xs ${pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className={`text-xs flex items-center gap-0.5 justify-end mt-0.5 ${p.ppl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {p.ppl >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
                       {pct >= 0 ? '+' : ''}{fmt(pct)}%
                     </p>
                   </div>
