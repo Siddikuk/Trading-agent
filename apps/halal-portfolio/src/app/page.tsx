@@ -11,7 +11,7 @@ function fmt(n: number | null | undefined, d = 2) {
   return n.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
-const CACHE_KEY = 'hp_dash_v1'
+const CACHE_KEY = 'hp_dash_v2'
 const CACHE_TTL = 60_000
 
 export default function Dashboard() {

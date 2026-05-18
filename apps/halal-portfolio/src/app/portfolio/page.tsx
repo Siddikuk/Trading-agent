@@ -10,7 +10,7 @@ function fmt(n: number | null | undefined, d = 2) {
   return n.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
-const CACHE_KEY = 'hp_dash_v1'
+const CACHE_KEY = 'hp_dash_v2'
 
 export default function Portfolio() {
   const [mounted, setMounted] = useState(false)
@@ -32,9 +32,19 @@ export default function Portfolio() {
         if (raw) {
           const c = JSON.parse(raw)
           if (Date.now() - c.ts < 60_000) {
-            setPositions(c.positions)
-            setAccount(c.account ?? null)
+            setPositions(c.positions ?? [])
+            if (c.account) {
+              setAccount(c.account)
+              setLoading(false)
+              return
+            }
+            // Positions cached but account missing — fetch account only
             setLoading(false)
+            try {
+              const acc = await getAccountSummary(s)
+              setAccount(acc)
+              try { localStorage.setItem(CACHE_KEY, JSON.stringify({ positions: c.positions, account: acc, ts: c.ts })) } catch { /* ignore */ }
+            } catch { /* show positions without totals */ }
             return
           }
         }
