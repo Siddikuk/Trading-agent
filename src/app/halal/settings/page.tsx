@@ -7,11 +7,13 @@ import { Key, Eye, EyeOff, CheckCircle2, AlertCircle, ExternalLink } from 'lucid
 export default function SettingsPage() {
   const [settings, setSettings] = useState<T212Settings>({
     apiKey: '',
+    privateKey: '',
     accountType: 'live',
     weeklyBudget: 50,
     dcaDay: 0,
   })
   const [showKey, setShowKey] = useState(false)
+  const [showPrivateKey, setShowPrivateKey] = useState(false)
   const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -33,6 +35,7 @@ export default function SettingsPage() {
       const res = await fetch('/api/t212/equity/account/summary', {
         headers: {
           'x-t212-key': settings.apiKey,
+          'x-t212-private-key': settings.privateKey,
           'x-t212-account': settings.accountType,
         },
       })
@@ -109,27 +112,51 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* API Key */}
-      <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4 space-y-3">
+      {/* API Keys */}
+      <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4 space-y-4">
         <label className="text-sm font-medium text-zinc-200 flex items-center gap-2">
           <Key size={14} className="text-green-400" />
-          API Key
+          API Key &amp; Private Key
         </label>
-        <div className="flex gap-2">
-          <input
-            type={showKey ? 'text' : 'password'}
-            value={settings.apiKey}
-            onChange={e => setSettings(s => ({ ...s, apiKey: e.target.value }))}
-            placeholder="Paste your T212 API key here"
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-green-600"
-          />
-          <button
-            onClick={() => setShowKey(v => !v)}
-            className="p-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
-          >
-            {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
+
+        <div className="space-y-2">
+          <p className="text-xs text-zinc-500">API Key</p>
+          <div className="flex gap-2">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={settings.apiKey}
+              onChange={e => setSettings(s => ({ ...s, apiKey: e.target.value }))}
+              placeholder="Paste your T212 API key"
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-green-600"
+            />
+            <button
+              onClick={() => setShowKey(v => !v)}
+              className="p-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
         </div>
+
+        <div className="space-y-2">
+          <p className="text-xs text-zinc-500">Private Key</p>
+          <div className="flex gap-2">
+            <input
+              type={showPrivateKey ? 'text' : 'password'}
+              value={settings.privateKey}
+              onChange={e => setSettings(s => ({ ...s, privateKey: e.target.value }))}
+              placeholder="Paste your T212 private key"
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-green-600"
+            />
+            <button
+              onClick={() => setShowPrivateKey(v => !v)}
+              className="p-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              {showPrivateKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+
         <div className="flex gap-2">
           <button
             onClick={handleTest}

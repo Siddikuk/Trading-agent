@@ -1,5 +1,6 @@
 export interface T212Settings {
   apiKey: string
+  privateKey: string
   accountType: 'live' | 'demo'
   weeklyBudget: number
   dcaDay: number // 0=Mon, 4=Fri
@@ -45,6 +46,7 @@ export interface T212AccountSummary {
 
 const DEFAULT_SETTINGS: T212Settings = {
   apiKey: '',
+  privateKey: '',
   accountType: 'live',
   weeklyBudget: 50,
   dcaDay: 0,
@@ -68,7 +70,8 @@ export function saveSettings(s: T212Settings) {
 async function t212Fetch<T>(path: string, settings: T212Settings): Promise<T> {
   const res = await fetch(`/api/t212/${path}`, {
     headers: {
-      'x-t212-key': settings.apiKey,
+      'x-t212-key': settings.apiKey.trim(),
+      'x-t212-private-key': settings.privateKey.trim(),
       'x-t212-account': settings.accountType,
     },
   })

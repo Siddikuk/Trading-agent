@@ -5,15 +5,13 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params
-  const apiKey = request.headers.get('x-t212-key')
+  const apiKey = request.headers.get('x-t212-key')?.trim()
+  const privateKey = request.headers.get('x-t212-private-key')?.trim()
   const accountType = request.headers.get('x-t212-account') || 'live'
 
   if (!apiKey) {
     return NextResponse.json({ error: 'No API key' }, { status: 401 })
   }
-
-  // Trim accidental whitespace from the key
-  const cleanKey = apiKey.trim()
 
   const base =
     accountType === 'demo'
@@ -27,13 +25,23 @@ export async function GET(
     url.searchParams.set(key, value)
   })
 
+  // Build Authorization header:
+  // If private key provided → Basic Auth: base64(apiKey:privateKey)
+  // Otherwise → raw API key (older T212 API style)
+  let authHeader: string
+  if (privateKey) {
+    const credentials = Buffer.from(`${apiKey}:${privateKey}`).toString('base64')
+    authHeader = `Basic ${credentials}`
+  } else {
+    authHeader = apiKey
+  }
+
   try {
     const res = await fetch(url.toString(), {
       headers: {
-        Authorization: cleanKey,
+        Authorization: authHeader,
         'Content-Type': 'application/json',
       },
-      // 10s timeout
       signal: AbortSignal.timeout(10000),
     })
 
