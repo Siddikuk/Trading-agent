@@ -158,10 +158,14 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* Stats row — totals from account summary (GBP accurate) */}
+      {/* Stats row — totals derived from position ppl + price ratio (no FX issues) */}
       {(() => {
-        const inv     = account?.cash?.invested ?? 0
-        const pnl     = account?.cash?.ppl ?? summary.totalPnl
+        const pnl     = summary.totalPnl
+        const inv     = positions.reduce((s, p) => {
+          if (p.averagePrice <= 0) return s
+          const pct = (p.currentPrice - p.averagePrice) / p.averagePrice
+          return s + (Math.abs(pct) > 1e-6 ? p.ppl / pct : 0)
+        }, 0)
         const val     = inv + pnl
         const pnlPct  = inv > 0 ? (pnl / inv) * 100 : 0
         const stats = [
