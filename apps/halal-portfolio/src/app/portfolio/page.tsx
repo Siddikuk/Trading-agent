@@ -5,7 +5,8 @@ import { loadSettings, getPositions, Position } from '@/lib/t212'
 import { STOCKS } from '@/lib/stocks'
 import { TrendingUp, TrendingDown, RefreshCw, ShieldCheck, ShieldAlert } from 'lucide-react'
 
-function fmt(n: number, d = 2) {
+function fmt(n: number | null | undefined, d = 2) {
+  if (n == null || !isFinite(n)) return (0).toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d })
   return n.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 

@@ -6,7 +6,8 @@ import { loadSettings, getPositions, getAccountSummary, Position, AccountSummary
 import { getRecommendation, getRotationPlan, portfolioSummary, projectedValue } from '@/lib/recommendation'
 import { Settings, RefreshCw, TrendingUp, TrendingDown, ShoppingCart, Zap, Calendar, AlertCircle } from 'lucide-react'
 
-function fmt(n: number, d = 2) {
+function fmt(n: number | null | undefined, d = 2) {
+  if (n == null || !isFinite(n)) return (0).toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d })
   return n.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
@@ -160,7 +161,7 @@ export default function Dashboard() {
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         {[
-          { label: 'Portfolio value', value: `£${fmt(summary.totalValue)}`, sub: account ? `Cash: £${fmt(account.cash.free)}` : `${summary.positions} stocks` },
+          { label: 'Portfolio value', value: `£${fmt(summary.totalValue)}`, sub: account?.cash ? `Cash: £${fmt(account.cash.free)}` : `${summary.positions} stocks` },
           { label: 'Invested', value: `£${fmt(summary.totalInvested)}`, sub: `${summary.positions} positions` },
           {
             label: 'Total return',
