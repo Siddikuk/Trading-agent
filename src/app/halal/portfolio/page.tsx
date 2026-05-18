@@ -17,19 +17,34 @@ export default function PortfolioPage() {
 
   const halalTickers = new Set(HALAL_STOCKS.map(s => s.ticker))
 
-  async function load() {
+  async function load(forceRefresh = false) {
     const settings = loadSettings()
     if (!settings.apiKey) {
       setError('No API key — go to Settings first')
       setLoading(false)
       return
     }
+    // Use dashboard cache if fresh
+    if (!forceRefresh) {
+      try {
+        const raw = localStorage.getItem('halal_dashboard_cache')
+        if (raw) {
+          const c = JSON.parse(raw)
+          if (Date.now() - c.ts < 60_000) {
+            setPositions(c.positions)
+            setLoading(false)
+            return
+          }
+        }
+      } catch { /* ignore */ }
+    }
     try {
       const pos = await getPositions(settings)
       setPositions(pos)
       setError(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load')
+      const msg = e instanceof Error ? e.message : 'Failed to load'
+      setError(msg.includes('429') ? 'T212 rate limit — wait 30s then refresh' : msg)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -40,7 +55,7 @@ export default function PortfolioPage() {
 
   function handleRefresh() {
     setRefreshing(true)
-    load()
+    load(true)
   }
 
   const totalValue = positions.reduce((s, p) => s + p.currentPrice * p.quantity, 0)

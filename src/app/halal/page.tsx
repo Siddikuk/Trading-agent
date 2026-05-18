@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { loadSettings, getPositions, getAccountSummary, T212Position, T212AccountSummary } from '@/lib/halal/t212'
 import { getRecommendation, summarisePortfolio, projectValue, formatDcaDay, Recommendation } from '@/lib/halal/recommendation'
 import { HALAL_STOCKS, SECTOR_COLORS } from '@/lib/halal/stocks'
-import { TrendingUp, TrendingDown, ShoppingCart, AlertCircle, Settings, Zap, Calendar, Target } from 'lucide-react'
+import { TrendingUp, TrendingDown, ShoppingCart, AlertCircle, Settings, Zap, Calendar, Target, RefreshCw } from 'lucide-react'
 import Link from 'next/link'
 
 function fmt(n: number, decimals = 2) {
@@ -19,27 +19,78 @@ function UrgencyBadge({ urgency }: { urgency: Recommendation['urgency'] }) {
   return <span className="bg-zinc-700 text-zinc-300 text-xs px-2 py-0.5 rounded-full">NEXT WEEK</span>
 }
 
+const CACHE_KEY = 'halal_dashboard_cache'
+const CACHE_TTL_MS = 60_000 // 1 minute
+
+function loadCache(): { positions: T212Position[]; account: T212AccountSummary; ts: number } | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY)
+    if (!raw) return null
+    const c = JSON.parse(raw)
+    if (Date.now() - c.ts > CACHE_TTL_MS) return null
+    return c
+  } catch {
+    return null
+  }
+}
+
+function saveCache(positions: T212Position[], account: T212AccountSummary) {
+  localStorage.setItem(CACHE_KEY, JSON.stringify({ positions, account, ts: Date.now() }))
+}
+
 export default function DashboardPage() {
   const [positions, setPositions] = useState<T212Position[]>([])
   const [account, setAccount] = useState<T212AccountSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cacheAge, setCacheAge] = useState<number | null>(null)
   const settings = typeof window !== 'undefined' ? loadSettings() : null
 
-  useEffect(() => {
-    if (!settings?.apiKey) {
-      setLoading(false)
-      return
+  const loadData = useCallback(async (forceRefresh = false) => {
+    if (!settings?.apiKey) { setLoading(false); return }
+
+    // Use cache if fresh enough and not forced
+    if (!forceRefresh) {
+      const cached = loadCache()
+      if (cached) {
+        setPositions(cached.positions)
+        setAccount(cached.account)
+        setCacheAge(Math.round((Date.now() - cached.ts) / 1000))
+        setLoading(false)
+        return
+      }
     }
-    Promise.all([getPositions(settings), getAccountSummary(settings)])
-      .then(([pos, acc]) => {
-        setPositions(pos)
-        setAccount(acc)
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+
+    setError(null)
+    try {
+      // Sequential calls with 1.5s gap to respect T212 rate limits
+      const pos = await getPositions(settings)
+      await new Promise(r => setTimeout(r, 1500))
+      const acc = await getAccountSummary(settings)
+      setPositions(pos)
+      setAccount(acc)
+      setCacheAge(0)
+      saveCache(pos, acc)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed'
+      if (msg.includes('429')) {
+        setError('T212 rate limit hit — please wait 30 seconds then click Refresh')
+      } else {
+        setError(msg)
+      }
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [settings?.apiKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleRefresh() {
+    setRefreshing(true)
+    loadData(true)
+  }
 
   if (!settings?.apiKey) {
     return (
@@ -71,13 +122,22 @@ export default function DashboardPage() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-center">
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-center px-4">
         <AlertCircle className="text-red-400" size={32} />
         <p className="text-zinc-300 font-medium">Connection failed</p>
         <p className="text-sm text-zinc-500 max-w-sm">{error}</p>
-        <Link href="/halal/settings" className="text-sm text-green-400 hover:text-green-300 transition-colors">
-          Check API key in Settings →
-        </Link>
+        <div className="flex gap-3">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="px-4 py-2 bg-green-800 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            {refreshing ? 'Retrying…' : 'Retry'}
+          </button>
+          <Link href="/halal/settings" className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors">
+            Settings
+          </Link>
+        </div>
       </div>
     )
   }
@@ -99,11 +159,24 @@ export default function DashboardPage() {
           <h1 className="text-xl font-bold text-zinc-100">Dashboard</h1>
           <p className="text-sm text-zinc-500">
             {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {cacheAge !== null && (
+              <span className="ml-2 text-zinc-600 text-xs">· data {cacheAge === 0 ? 'just refreshed' : `${cacheAge}s old`}</span>
+            )}
           </p>
         </div>
-        <Link href="/halal/settings" className="text-zinc-500 hover:text-zinc-300 transition-colors">
-          <Settings size={18} />
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="p-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Refresh from T212 (max once per minute)"
+          >
+            <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+          <Link href="/halal/settings" className="text-zinc-500 hover:text-zinc-300 transition-colors p-2">
+            <Settings size={18} />
+          </Link>
+        </div>
       </div>
 
       {/* Portfolio summary cards */}
