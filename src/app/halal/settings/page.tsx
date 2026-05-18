@@ -41,8 +41,16 @@ export default function SettingsPage() {
         const total = data?.cash?.total?.toFixed(2) ?? '?'
         setTestResult({ ok: true, msg: `Connected! Account total: £${total}` })
       } else {
-        const err = await res.json()
-        setTestResult({ ok: false, msg: err?.error || `Error ${res.status}` })
+        let msg = `Error ${res.status}`
+        try {
+          const err = await res.json()
+          // T212 returns various error shapes
+          msg = err?.message || err?.error || err?.code || JSON.stringify(err)
+        } catch { /* ignore */ }
+        if (res.status === 401) {
+          msg = `401 Unauthorized — check: (1) is the account type correct? Live key → pick Live, Demo key → pick Demo. (2) did you copy the full key? Original T212 message: ${msg}`
+        }
+        setTestResult({ ok: false, msg })
       }
     } catch (e) {
       setTestResult({ ok: false, msg: e instanceof Error ? e.message : 'Connection failed' })
@@ -79,6 +87,9 @@ export default function SettingsPage() {
       {/* Account type */}
       <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4 space-y-3">
         <label className="text-sm font-medium text-zinc-200">Account type</label>
+        <p className="text-xs text-yellow-400 bg-yellow-900/20 border border-yellow-800/30 rounded-lg px-3 py-2">
+          ⚠ This must match your API key. If you generated the key from your real T212 account, choose <strong>Live</strong>. If from the practice/demo account, choose <strong>Demo</strong>. Mismatch = 401 error.
+        </p>
         <div className="flex gap-3">
           {(['live', 'demo'] as const).map(type => (
             <button

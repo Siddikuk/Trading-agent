@@ -12,6 +12,9 @@ export async function GET(
     return NextResponse.json({ error: 'No API key' }, { status: 401 })
   }
 
+  // Trim accidental whitespace from the key
+  const cleanKey = apiKey.trim()
+
   const base =
     accountType === 'demo'
       ? 'https://demo.trading212.com/api/v0'
@@ -27,7 +30,7 @@ export async function GET(
   try {
     const res = await fetch(url.toString(), {
       headers: {
-        Authorization: apiKey,
+        Authorization: cleanKey,
         'Content-Type': 'application/json',
       },
       // 10s timeout
