@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { loadSettings, getPositions, getAccountSummary, T212Position, T212AccountSummary } from '@/lib/halal/t212'
+import { loadSettings, getPositions, getAccountSummary, T212Position, T212AccountSummary, T212Settings } from '@/lib/halal/t212'
 import { getRecommendation, summarisePortfolio, projectValue, formatDcaDay, getWeekNumber } from '@/lib/halal/recommendation'
 import { HALAL_STOCKS, DCA_ROTATION } from '@/lib/halal/stocks'
 import { TrendingUp, TrendingDown, ShoppingCart, AlertCircle, Settings, Zap, Calendar, RefreshCw } from 'lucide-react'
@@ -11,7 +11,7 @@ function fmt(n: number, decimals = 2) {
   return n.toLocaleString('en-GB', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
 }
 
-function UrgencyBadge({ urgency }: { urgency: Recommendation['urgency'] }) {
+function UrgencyBadge({ urgency }: { urgency: 'buy-now' | 'buy-this-week' | 'wait' }) {
   if (urgency === 'buy-now')
     return <span className="bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full animate-pulse">BUY TODAY</span>
   if (urgency === 'buy-this-week')
@@ -20,7 +20,7 @@ function UrgencyBadge({ urgency }: { urgency: Recommendation['urgency'] }) {
 }
 
 const CACHE_KEY = 'halal_dashboard_cache'
-const CACHE_TTL_MS = 60_000 // 1 minute
+const CACHE_TTL_MS = 60_000
 
 function loadCache(): { positions: T212Position[]; account: T212AccountSummary; ts: number } | null {
   try {
@@ -39,16 +39,17 @@ function saveCache(positions: T212Position[], account: T212AccountSummary) {
 }
 
 export default function DashboardPage() {
+  // settings loaded in useEffect to avoid SSR/client hydration mismatch
+  const [settings, setSettings] = useState<T212Settings | null>(null)
   const [positions, setPositions] = useState<T212Position[]>([])
   const [account, setAccount] = useState<T212AccountSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cacheAge, setCacheAge] = useState<number | null>(null)
-  const settings = typeof window !== 'undefined' ? loadSettings() : null
 
-  const loadData = useCallback(async (forceRefresh = false) => {
-    if (!settings?.apiKey) { setLoading(false); return }
+  const loadData = useCallback(async (s: T212Settings, forceRefresh = false) => {
+    if (!s.apiKey) { setLoading(false); return }
 
     // Use cache if fresh enough and not forced
     if (!forceRefresh) {
@@ -65,9 +66,9 @@ export default function DashboardPage() {
     setError(null)
     try {
       // Sequential calls with 1.5s gap to respect T212 rate limits
-      const pos = await getPositions(settings)
+      const pos = await getPositions(s)
       await new Promise(r => setTimeout(r, 1500))
-      const acc = await getAccountSummary(settings)
+      const acc = await getAccountSummary(s)
       setPositions(pos)
       setAccount(acc)
       setCacheAge(0)
@@ -83,13 +84,19 @@ export default function DashboardPage() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [settings?.apiKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Load settings from localStorage after mount, then fetch data
+  useEffect(() => {
+    const s = loadSettings()
+    setSettings(s)
+    loadData(s)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleRefresh() {
+    if (!settings) return
     setRefreshing(true)
-    loadData(true)
+    loadData(settings, true)
   }
 
   if (!settings?.apiKey) {
